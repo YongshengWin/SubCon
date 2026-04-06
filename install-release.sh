@@ -96,6 +96,7 @@ detect_public_ip() {
   fetch_text "https://api.ipify.org" 2>/dev/null || true
 }
 
+detect_version() {
   echo "v0.5.1"
 }
 
