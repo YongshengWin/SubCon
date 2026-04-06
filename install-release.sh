@@ -132,8 +132,9 @@ write_env_file() {
     source "${ENV_FILE}"
   fi
 
+  # 强制用新版本号覆盖旧值，其余配置保留旧值
   cat > "${ENV_FILE}" <<EOF
-SSC_VERSION=${SSC_VERSION:-${VERSION:-unknown}}
+SSC_VERSION=${VERSION:-${SSC_VERSION:-unknown}}
 SSC_LISTEN=${SSC_LISTEN:-${APP_LISTEN}}
 SSC_PORT=${SSC_PORT:-${APP_PORT}}
 SSC_TEST_URL=${SSC_TEST_URL:-${APP_TEST_URL}}
@@ -817,16 +818,9 @@ main() {
   ok "安装/更新完成 (版本: ${version})"
   
   if systemctl is-active --quiet "${APP_NAME}"; then
-    echo
-    printf "  ${YELLOW}▶ 注意: 检测到服务正在运行，需要重启以应用新版本。${NC}\n"
-    read -p "  是否立即重启服务? [y/N] " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-      systemctl restart "${APP_NAME}"
-      ok "服务已重启，新版本已生效。"
-    else
-      warn "已跳过重启。请记得稍后手动执行 'sub 7' 重启服务。"
-    fi
+    # 自动重启（curl|bash 管道场景无法交互，统一自动重启）
+    systemctl restart "${APP_NAME}"
+    ok "服务已重启，新版本已生效。"
   else
     systemctl start "${APP_NAME}"
     ok "服务已启动。"
