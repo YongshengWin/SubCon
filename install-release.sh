@@ -417,7 +417,18 @@ update_service() {
     return 0
   fi
   info "开始更新..."
-  curl -fsSL "${REMOTE_INSTALL_URL}" | VERSION="${latest}" bash
+  # 加 Cache-Control 头，尽量绕过 CDN 缓存拿到最新安装脚本
+  curl -fsSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" "${REMOTE_INSTALL_URL}" | VERSION="${latest}" bash
+  # 兜底：强制覆盖 env 文件里的版本号，防止旧缓存脚本写回旧版本
+  if [[ -f "${ENV_FILE}" ]]; then
+    sed -i "s/^SSC_VERSION=.*/SSC_VERSION=${latest}/" "${ENV_FILE}"
+    ok "版本已更新至 ${latest}"
+  fi
+  # 自动重启服务使新版本生效
+  if systemctl is-active --quiet "${APP_NAME}"; then
+    systemctl restart "${APP_NAME}"
+    ok "服务已自动重启，新版本已生效。"
+  fi
 }
 
 install_caddy() {
