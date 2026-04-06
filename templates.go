@@ -172,12 +172,15 @@ URL2;URL3；URL4"></textarea>
           <label for="convert-link">转换链接</label>
           <div class="copy-row">
             <input id="convert-link" type="text" readonly placeholder="点击生成后出现">
-            <button class="secondary" id="copy-config-btn" type="button">复制结果</button>
+            <button class="secondary" id="copy-short-btn" type="button">复制短链</button>
           </div>
         </div>
 
         <div class="pill-row" id="pill-row"></div>
-        <div class="status" id="status"></div>
+        <div class="copy-row" style="margin-top: 4px; justify-content: space-between; align-items: center;">
+            <div class="status" id="status"></div>
+            <button class="secondary" style="font-size: 13px; padding: 6px 14px;" id="copy-config-btn" type="button">复制配置内容</button>
+        </div>
         <pre id="output">等待生成...</pre>
       </div>
 
@@ -196,6 +199,7 @@ URL2;URL3；URL4"></textarea>
       previewBtn: document.getElementById('preview-btn'),
       copyLinkBtn: document.getElementById('copy-link-btn'),
       openLinkBtn: document.getElementById('open-link-btn'),
+      copyShortBtn: document.getElementById('copy-short-btn'),
       copyConfigBtn: document.getElementById('copy-config-btn')
     };
 
@@ -283,15 +287,31 @@ URL2;URL3；URL4"></textarea>
     }
 
     el.previewBtn.addEventListener('click', preview);
-    el.copyLinkBtn.addEventListener('click', () => copyText(buildConvertURL(false), '转换链接已复制。'));
-    el.copyConfigBtn.addEventListener('click', () => copyText(el.output.textContent, '转换结果已复制。'));
+    el.copyLinkBtn.addEventListener('click', () => {
+      const val = el.convertLink.value || buildConvertURL(false);
+      copyText(val, '转换链接已复制。');
+    });
+    el.copyShortBtn.addEventListener('click', () => {
+      if (!el.convertLink.value) {
+        setStatus('请先生成短链。', 'error');
+        return;
+      }
+      copyText(el.convertLink.value, '短链接已复制。');
+    });
+    el.copyConfigBtn.addEventListener('click', () => {
+      if (el.output.textContent === '等待生成...' || el.output.textContent === '处理中...') {
+        setStatus('没有可复制的配置内容。', 'error');
+        return;
+      }
+      copyText(el.output.textContent, '配置内容已复制。');
+    });
     el.openLinkBtn.addEventListener('click', () => {
-      const source = el.subURL.value.trim();
-      if (!source) {
+      const val = el.convertLink.value || buildConvertURL(false);
+      if (!val || val.includes('点击生成后出现')) {
         setStatus('先填原始订阅 URL。', 'error');
         return;
       }
-      window.open(buildConvertURL(false), '_blank', 'noopener,noreferrer');
+      window.open(val, '_blank', 'noopener,noreferrer');
     });
   </script>
 </body>
