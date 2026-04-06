@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_NAME="surge-sub-converter"
+INSTALL_DIR="/opt/${APP_NAME}"
+BIN_PATH="/usr/local/bin/${APP_NAME}"
+SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
+APP_PORT="${APP_PORT:-8090}"
+
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "请使用 root 运行安装脚本"
+  exit 1
+fi
+
+if ! command -v go >/dev/null 2>&1; then
+  echo "未检测到 Go，请先安装 Go 1.22+"
+  exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+mkdir -p "${INSTALL_DIR}"
+
+cp "${SCRIPT_DIR}/go.mod" "${INSTALL_DIR}/go.mod"
+cp "${SCRIPT_DIR}/main.go" "${INSTALL_DIR}/main.go"
+cp "${SCRIPT_DIR}/templates.go" "${INSTALL_DIR}/templates.go"
+
+cd "${INSTALL_DIR}"
+go build -trimpath -ldflags="-s -w" -o "${BIN_PATH}" .
+
+cat > "${SERVICE_FILE}" <<EOF
+[Unit]
+Description=Surge Subscription Converter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${INSTALL_DIR}
+ExecStart=${BIN_PATH}
+Environment=SSC_LISTEN=0.0.0.0
+Environment=SSC_PORT=${APP_PORT}
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now "${APP_NAME}"
+
+echo
+echo "安装完成"
+echo "前端页面: http://你的服务器IP:${APP_PORT}/"
+echo "健康检查: http://你的服务器IP:${APP_PORT}/healthz"
+echo "转换接口: http://你的服务器IP:${APP_PORT}/convert?url=http%3A%2F%2F你的3x-ui域名或IP%3A订阅端口%2Fsub%2F你的subid"
