@@ -97,18 +97,7 @@ detect_public_ip() {
 }
 
 detect_version() {
-  if [[ -n "${VERSION:-}" ]]; then
-    echo "${VERSION}"
-    return
-  fi
-
-  local response
-  response="$(fetch_text "${API_URL}")"
-  VERSION="$(printf '%s' "${response}" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-  if [[ -z "${VERSION}" ]]; then
-    echo "无法自动获取最新版本，请先设置 REPO_OWNER/REPO_NAME 或手动传入 VERSION"
-    exit 1
-  fi
+  VERSION="v0.6.2"
   echo "${VERSION}"
 }
 
@@ -369,6 +358,10 @@ add_link() {
     *) fail "不支持的目标客户端"; return 1 ;;
   esac
   [[ -z "${name}" || -z "${source}" ]] && { fail "名称和订阅URL不能为空"; return 1; }
+  
+  # 规范化清理 URL 中的换行符，防止破坏文件结构
+  source="$(echo "${source}" | tr '\r\n' ';' | sed 's/;;*/;/g; s/^;//; s/;$//')"
+  
   local token
   token="$(generate_token 32)"
   echo "${token}|${name}|${target}|${source}" >> "${LINKS_FILE}"

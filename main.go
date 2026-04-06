@@ -29,7 +29,7 @@ const (
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v0.6.1"
+	version               = "v0.6.2"
 )
 
 type config struct {
@@ -1194,6 +1194,16 @@ func handleShortenAPI(cfg config) http.HandlerFunc {
 			http.Error(w, "target and url are required", http.StatusBadRequest)
 			return
 		}
+
+		// 核心修复：防止换行符破坏 subscriptions.txt 的行结构
+		urlStr = strings.ReplaceAll(urlStr, "\r\n", ";")
+		urlStr = strings.ReplaceAll(urlStr, "\n", ";")
+		urlStr = strings.ReplaceAll(urlStr, "\r", ";")
+		// 清理可能产生的重复分号
+		for strings.Contains(urlStr, ";;") {
+			urlStr = strings.ReplaceAll(urlStr, ";;", ";")
+		}
+		urlStr = strings.Trim(urlStr, ";")
 
 		linksFileMu.Lock()
 		defer linksFileMu.Unlock()
