@@ -1079,7 +1079,8 @@ func handleShortenAPI(cfg config) http.HandlerFunc {
 			return
 		}
 
-		log.Printf("[Shorten API] Request received from %s", r.RemoteAddr)
+		log.Printf("[DEBUG] Shorten API called by %s", r.RemoteAddr)
+		log.Printf("[DEBUG] Using LinksFile: %s", cfg.LinksFile)
 
 		var req shortenRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1138,6 +1139,7 @@ func handleShortenAPI(cfg config) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		shortPath := fmt.Sprintf("/s/%d", newID)
+		log.Printf("[DEBUG] Short link generated: %s (id: %d)", shortPath, newID)
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":  true,
 			"shortUrl": shortPath,

@@ -121,7 +121,14 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!DOCTYPE html>
       line-height: 1.65;
       font-size: 13px;
     }
-    @media (max-width: 720px) {
+    .version-tag {
+      margin-top: 2rem;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      text-align: center;
+      opacity: 0.5;
+    }
+    @media (max-width: 640px) {
       .shell { padding: 20px 14px 32px; }
       .panel { padding: 18px; }
       .copy-row { display: grid; grid-template-columns: 1fr; }
@@ -170,6 +177,8 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!DOCTYPE html>
         <div class="status" id="status"></div>
         <pre id="output">等待生成...</pre>
       </div>
+
+      <div class="version-tag">v0.3.7 MEGA DEBUG</div>
     </div>
   </div>
 
@@ -243,9 +252,12 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!DOCTYPE html>
           const shortData = await shortResp.json();
           if (shortData.success && shortData.shortUrl) {
             el.convertLink.value = window.location.origin + shortData.shortUrl;
+          } else {
+            setStatus('[API ERROR] ' + (shortData.error || '短链生成失败'), 'error');
           }
         } catch (e) {
           console.error('Failed to get short URL', e);
+          setStatus('[FETCH ERROR] 无法连接后台短链 API', 'error');
         }
       } catch (err) {
         renderPills({ nodeCount: 0, ignoredTypes: [] });

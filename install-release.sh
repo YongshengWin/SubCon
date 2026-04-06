@@ -802,13 +802,16 @@ main() {
   echo "安装完成"
   echo "安装版本: ${version}"
   if [[ -f "${ENV_FILE}" ]]; then
+    # shellcheck disable=SC1090
     source "${ENV_FILE}"
   fi
   
   local scheme="${SUB_PUBLIC_SCHEME:-http}"
   local host="${SUB_PUBLIC_HOST:-127.0.0.1}"
-  if [[ "${host}" != *:* && "${scheme}" == "http" && -n "${SSC_PORT:-}" ]]; then
-    host="${host}:${SSC_PORT}"
+  local port="${SSC_PORT:-8090}"
+  
+  if [[ "${host}" != *:* && "${scheme}" == "http" ]]; then
+    host="${host}:${port}"
   fi
   local base="${scheme}://${host}"
 
