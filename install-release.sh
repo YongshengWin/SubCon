@@ -805,7 +805,7 @@ main() {
   local base
   base="$(public_base)"
   echo "前端页面: ${base}/"
-  echo "健康检查: http://127.0.0.1:${SSC_PORT:-8090}/healthz"
+  echo "健康检查: ${base}/healthz"
   echo "查看日志: journalctl -u ${APP_NAME} -f"
 }
 
