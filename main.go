@@ -40,6 +40,7 @@ type config struct {
 	HTTPClient   *http.Client
 	CertFile     string
 	KeyFile      string
+	LinksFile    string
 }
 
 type proxyNode struct {
@@ -89,6 +90,7 @@ func main() {
 	mux.HandleFunc("/healthz", handleHealthz)
 	mux.HandleFunc("/convert", handleConvert(cfg, false))
 	mux.HandleFunc("/api/convert", handleConvert(cfg, true))
+	mux.HandleFunc("/s/", handleShortLink(cfg))
 
 	addr := cfg.Listen + ":" + cfg.Port
 	server := &http.Server{
@@ -114,6 +116,7 @@ func loadConfig() config {
 		CacheTTL:     defaultCacheTTL,
 		CertFile:     getenv("SSC_CERT_FILE", ""),
 		KeyFile:      getenv("SSC_KEY_FILE", ""),
+		LinksFile:    getenv("SSC_LINKS_FILE", "/opt/surge-sub-converter/data/subscriptions.txt"),
 	}
 	if raw := os.Getenv("SSC_FETCH_TIMEOUT"); raw != "" {
 		if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
@@ -1000,4 +1003,62 @@ func (c *converterCache) Set(key string, entry cacheEntry) {
 	c.mu.Lock()
 	c.items[key] = entry
 	c.mu.Unlock()
+}
+
+func handleShortLink(cfg config) http.HandlerFunc {
+	converterFunc := handleConvert(cfg, false)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		idStr := strings.TrimPrefix(r.URL.Path, "/s/")
+		if idStr == "" {
+			http.NotFound(w, r)
+			return
+		}
+
+		id, err := strconv.Atoi(idStr)
+		if err != nil || id < 1 {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+
+		data, err := os.ReadFile(cfg.LinksFile)
+		if err != nil {
+			log.Printf("failed to read links file %s: %v", cfg.LinksFile, err)
+			http.NotFound(w, r)
+			return
+		}
+
+		lines := strings.Split(string(data), "\n")
+		var validLines []string
+		for _, line := range lines {
+			if strings.TrimSpace(line) != "" {
+				validLines = append(validLines, line)
+			}
+		}
+
+		if id > len(validLines) {
+			http.NotFound(w, r)
+			return
+		}
+
+		parts := strings.SplitN(validLines[id-1], "|", 3)
+		if len(parts) < 3 {
+			http.Error(w, "invalid link format", http.StatusInternalServerError)
+			return
+		}
+
+		target := strings.TrimSpace(parts[1])
+		urlStr := strings.TrimSpace(parts[2])
+
+		q := r.URL.Query()
+		q.Set("target", target)
+		q.Set("url", urlStr)
+		r.URL.RawQuery = q.Encode()
+
+		converterFunc(w, r)
+	}
 }

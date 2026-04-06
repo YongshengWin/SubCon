@@ -310,7 +310,8 @@ list_links() {
     printf "  ${BOLD}${CYAN}%d.${NC} %s\n" "$i" "${name}"
     printf "     ${DIM}目标:${NC} %s\n" "${target}"
     printf "     ${DIM}来源:${NC} %s\n" "${source}"
-    printf "     ${DIM}链接:${NC} ${GREEN}%s${NC}\n" "${base}/convert?target=${target}&url=${encoded}"
+    printf "     ${DIM}链接:${NC} ${DIM}%s/convert?target=${target}&url=${encoded}${NC}\n" "${base}"
+    printf "     ${DIM}短链:${NC} ${GREEN}%s/s/%d${NC}\n" "${base}" "$i"
     echo
     i=$((i+1))
   done < "${LINKS_FILE}"
