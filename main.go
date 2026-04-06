@@ -54,6 +54,7 @@ type proxyNode struct {
 
 type pageData struct {
 	DefaultTarget string
+	Version       string
 }
 
 type vmessPayload struct {
@@ -144,6 +145,7 @@ func handleIndex(cfg config) http.HandlerFunc {
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		if err := indexTemplate.Execute(w, pageData{
 			DefaultTarget: defaultTarget,
+			Version:       version,
 		}); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
