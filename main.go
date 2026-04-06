@@ -23,12 +23,12 @@ const (
 	defaultListen         = "0.0.0.0"
 	defaultPort           = "8090"
 	defaultTestURL        = "http://www.gstatic.com/generate_204"
-	defaultUserAgent      = "surge-sub-converter/0.4.7"
+	defaultUserAgent      = "surge-sub-converter/0.4.8"
 	defaultFetchTimeout   = 15 * time.Second
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v0.4.7"
+	version               = "v0.4.8"
 )
 
 type config struct {
@@ -590,7 +590,6 @@ func buildCommonOptions(params map[string]string, opts requestOptions) []string 
 
 	security := strings.ToLower(params["security"])
 	sni := firstNonEmpty(params["sni"], params["peer"], params["servername"], params["serverName"])
-	alpn := params["alpn"]
 	transport := strings.ToLower(params["type"])
 
 	if security == "tls" || security == "reality" {
@@ -602,9 +601,7 @@ func buildCommonOptions(params map[string]string, opts requestOptions) []string 
 			options = append(options, "skip-cert-verify=true")
 		}
 	}
-	if alpn != "" {
-		options = append(options, "alpn="+alpn)
-	}
+	// 移除 ALPN：因为 3x-ui 经常返回 "h2,http/1.1" 含有逗号，会导致 Surge 的 proxyline 解析混乱崩溃
 
 	switch transport {
 	case "ws":
