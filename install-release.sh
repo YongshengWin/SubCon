@@ -801,9 +801,17 @@ main() {
   echo
   echo "安装完成"
   echo "安装版本: ${version}"
-  load_env
-  local base
-  base="$(public_base)"
+  if [[ -f "${ENV_FILE}" ]]; then
+    source "${ENV_FILE}"
+  fi
+  
+  local scheme="${SUB_PUBLIC_SCHEME:-http}"
+  local host="${SUB_PUBLIC_HOST:-127.0.0.1}"
+  if [[ "${host}" != *:* && "${scheme}" == "http" && -n "${SSC_PORT:-}" ]]; then
+    host="${host}:${SSC_PORT}"
+  fi
+  local base="${scheme}://${host}"
+
   echo "前端页面: ${base}/"
   echo "健康检查: ${base}/healthz"
   echo "查看日志: journalctl -u ${APP_NAME} -f"
