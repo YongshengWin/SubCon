@@ -28,6 +28,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# ── 颜色和样式 ────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+info()    { printf "${CYAN}▶ %s${NC}\n" "$1"; }
+ok()      { printf "${GREEN}✔ %s${NC}\n" "$1"; }
+warn()    { printf "${YELLOW}⚠ %s${NC}\n" "$1"; }
+fail()    { printf "${RED}✘ %s${NC}\n" "$1"; }
+divider() { printf "${DIM}────────────────────────────────────────${NC}\n"; }
+
 require_root() {
   if [[ "${EUID}" -ne 0 ]]; then
     echo "请使用 root 运行安装脚本"
