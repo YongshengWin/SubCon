@@ -29,7 +29,7 @@ const (
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v0.6.0"
+	version               = "v0.6.1"
 )
 
 type config struct {
@@ -253,6 +253,13 @@ func convertSubscription(ctx context.Context, cfg config, subURL string, opts re
 				log.Printf("[WARN] Failed to fetch %s: %v", targetURL, err)
 				return
 			}
+			
+			// 自动尝试 Base64 解码订阅内容
+			decoded, err := decodeBase64(strings.TrimSpace(text))
+			if err == nil {
+				text = string(decoded)
+			}
+
 			mu.Lock()
 			allLinks = append(allLinks, splitLinks(text)...)
 			mu.Unlock()
@@ -332,9 +339,10 @@ func deduplicateNodes(nodes []proxyNode) []proxyNode {
 	seen := make(map[string]bool)
 	var unique []proxyNode
 	for _, n := range nodes {
-		// 生成节点指纹：类型+主机+端口+配置项内容
+		// 生成节点指纹：名称+类型+主机+端口+配置项内容
+		// 加入 Name 是为了防止不同名称但同服务器的备用节点被错误合并
 		optStr := strings.Join(n.Options, ",")
-		fp := fmt.Sprintf("%s|%s|%d|%s", n.SurgeType, n.Host, n.Port, optStr)
+		fp := fmt.Sprintf("%s|%s|%s|%d|%s", n.Name, n.SurgeType, n.Host, n.Port, optStr)
 		if !seen[fp] {
 			seen[fp] = true
 			unique = append(unique, n)
