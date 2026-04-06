@@ -506,28 +506,35 @@ setup_shared_cert() {
   info "访问地址: https://${domain}:${port}/"
   echo
   warn "Cloudflare 橙云支持的 HTTPS 端口: 443, 2053, 2083, 2087, 2096, 8443"
-  warn "如使用 Cloudflare，请确保 SSL/TLS 模式为 Full 或 Full (strict)"
-  echo
+  info "正在配置证书更新自动感知 (Systemd Path)..."
+  local path_unit="/etc/systemd/system/${APP_NAME}-cert.path"
+  local svc_unit="/etc/systemd/system/${APP_NAME}-cert.service"
 
-  local bare_domain="${domain%%:*}"
-  if command -v acme.sh >/dev/null 2>&1 || [[ -f /root/.acme.sh/acme.sh ]]; then
-    info "正在配置 acme.sh 证书续签后自动重载..."
-    local acme_cmd="acme.sh"
-    [[ ! -x "$(command -v acme.sh 2>/dev/null)" ]] && acme_cmd="/root/.acme.sh/acme.sh"
-    if "${acme_cmd}" --install-cert -d "${bare_domain}" \
-        --fullchain-file "${cert}" \
-        --key-file "${key}" \
-        --reloadcmd "systemctl restart ${APP_NAME}" 2>/dev/null; then
-      ok "已配置证书续期自动重载"
-    else
-      warn "自动配置失败，请手动执行:"
-      printf "  ${DIM}acme.sh --install-cert -d %s --reloadcmd \"systemctl restart %s\"${NC}\n" "${bare_domain}" "${APP_NAME}"
-    fi
-  else
-    warn "未检测到 acme.sh，请手动配置证书续期:"
-    printf "  ${DIM}acme.sh --install-cert -d %s --reloadcmd \"systemctl restart %s\"${NC}\n" "${bare_domain}" "${APP_NAME}"
-  fi
+  cat > "${path_unit}" <<EOF3
+[Unit]
+Description=Watch TLS cert for ${APP_NAME}
+
+[Path]
+PathChanged=${cert}
+
+[Install]
+WantedBy=multi-user.target
+EOF3
+
+  cat > "${svc_unit}" <<EOF3
+[Unit]
+Description=Restart ${APP_NAME} on cert change
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl restart ${APP_NAME}
+EOF3
+
+  systemctl daemon-reload
+  systemctl enable --now "${APP_NAME}-cert.path" 2>/dev/null
+  ok "已配置！当监测到证书更新时，面板将自动重载"
 }
+
 
 
 generate_nginx_config() {
