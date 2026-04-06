@@ -97,7 +97,8 @@ detect_public_ip() {
 }
 
 detect_version() {
-  echo "v0.5.1"
+  VERSION="v0.5.1"
+  echo "${VERSION}"
 }
 
 install_binary() {
@@ -115,6 +116,8 @@ install_binary() {
 }
 
 write_env_file() {
+  local target_ver="${1:-${VERSION:-${SSC_VERSION:-unknown}}}"
+  
   if [[ -f "${ENV_FILE}" ]]; then
     # shellcheck disable=SC1090
     source "${ENV_FILE}"
@@ -122,7 +125,7 @@ write_env_file() {
 
   # 强制用新版本号覆盖旧值，其余配置保留旧值
   cat > "${ENV_FILE}" <<EOF
-SSC_VERSION=${VERSION:-${SSC_VERSION:-unknown}}
+SSC_VERSION=${target_ver}
 SSC_LISTEN=${SSC_LISTEN:-${APP_LISTEN}}
 SSC_PORT=${SSC_PORT:-${APP_PORT}}
 SSC_TEST_URL=${SSC_TEST_URL:-${APP_TEST_URL}}
@@ -833,7 +836,7 @@ main() {
   version="$(detect_version)"
   SSC_VERSION="${version}"
   install_binary "${target}" "${version}"
-  write_env_file
+  write_env_file "${version}"
   install_ctl
   install_service
 
