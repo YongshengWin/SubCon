@@ -144,8 +144,11 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!DOCTYPE html>
       <p>输入原始订阅 URL，选择目标客户端，直接生成转换链接。</p>
 
       <div class="field">
-        <label for="sub-url">原始订阅 URL</label>
-        <textarea id="sub-url" placeholder="http://your-server:2096/sub/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></textarea>
+        <label for="sub-url">原始订阅 URL (多链接支持)</label>
+        <textarea id="sub-url" placeholder="支持每行一个 URL，或者使用英/中文分号分隔。
+示例：
+URL1
+URL2;URL3；URL4"></textarea>
       </div>
 
       <div class="field">

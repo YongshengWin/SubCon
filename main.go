@@ -29,7 +29,7 @@ const (
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v0.5.1"
+	version               = "v0.6.0"
 )
 
 type config struct {
@@ -238,19 +238,35 @@ func convertSubscription(ctx context.Context, cfg config, subURL string, opts re
 		return entry.Result, entry.Ignored, entry.Count, nil
 	}
 
-	linksText, err := fetchSubscription(cfg, subURL)
-	if err != nil {
-		return "", nil, 0, err
+	urls := splitURLs(subURL)
+	var allLinks []string
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	// 并发抓取所有订阅源
+	for _, u := range urls {
+		wg.Add(1)
+		go func(targetURL string) {
+			defer wg.Done()
+			text, err := fetchSubscription(cfg, targetURL)
+			if err != nil {
+				log.Printf("[WARN] Failed to fetch %s: %v", targetURL, err)
+				return
+			}
+			mu.Lock()
+			allLinks = append(allLinks, splitLinks(text)...)
+			mu.Unlock()
+		}(u)
 	}
-	_ = ctx
-	links := splitLinks(linksText)
-	if len(links) == 0 {
-		return "", nil, 0, errors.New("no nodes found in subscription")
+	wg.Wait()
+
+	if len(allLinks) == 0 {
+		return "", nil, 0, errors.New("no nodes found in any of the subscriptions")
 	}
 
-	nodes := make([]proxyNode, 0, len(links))
+	nodes := make([]proxyNode, 0, len(allLinks))
 	ignoredSet := map[string]struct{}{}
-	for _, link := range links {
+	for _, link := range allLinks {
 		node, err := parseProxy(link, opts)
 		if err != nil {
 			scheme := "unknown"
@@ -262,20 +278,26 @@ func convertSubscription(ctx context.Context, cfg config, subURL string, opts re
 		}
 		nodes = append(nodes, node)
 	}
+
 	if len(nodes) == 0 {
-		return "", nil, 0, errors.New("no supported nodes found in subscription")
+		return "", nil, 0, errors.New("no supported nodes found in aggregated subscriptions")
 	}
 
+	// 执行节点去重与重名处理
+	nodes = deduplicateNodes(nodes)
 	nodes = withUniqueNames(nodes)
+
 	configText, err := renderByTarget(nodes, opts)
 	if err != nil {
 		return "", nil, 0, err
 	}
+
 	ignored := make([]string, 0, len(ignoredSet))
 	for item := range ignoredSet {
 		ignored = append(ignored, item)
 	}
 	sort.Strings(ignored)
+
 	if cfg.CacheTTL > 0 {
 		resultCache.Set(cacheKey, cacheEntry{
 			Result:    configText,
@@ -285,6 +307,40 @@ func convertSubscription(ctx context.Context, cfg config, subURL string, opts re
 		})
 	}
 	return configText, ignored, len(nodes), nil
+}
+
+// splitURLs 解析多行或分号分隔的 URL
+func splitURLs(s string) []string {
+	// 支持换行、中英文分号分隔
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "；", "\n")
+	s = strings.ReplaceAll(s, ";", "\n")
+	
+	lines := strings.Split(s, "\n")
+	var res []string
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l != "" && (strings.HasPrefix(l, "http://") || strings.HasPrefix(l, "https://")) {
+			res = append(res, l)
+		}
+	}
+	return res
+}
+
+// deduplicateNodes 基于节点核心配置进行去重
+func deduplicateNodes(nodes []proxyNode) []proxyNode {
+	seen := make(map[string]bool)
+	var unique []proxyNode
+	for _, n := range nodes {
+		// 生成节点指纹：类型+主机+端口+配置项内容
+		optStr := strings.Join(n.Options, ",")
+		fp := fmt.Sprintf("%s|%s|%d|%s", n.SurgeType, n.Host, n.Port, optStr)
+		if !seen[fp] {
+			seen[fp] = true
+			unique = append(unique, n)
+		}
+	}
+	return unique
 }
 
 func fetchSubscription(cfg config, subURL string) (string, error) {
