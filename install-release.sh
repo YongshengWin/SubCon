@@ -96,20 +96,7 @@ detect_public_ip() {
   fetch_text "https://api.ipify.org" 2>/dev/null || true
 }
 
-detect_version() {
-  if [[ -n "${VERSION:-}" ]]; then
-    echo "${VERSION}"
-    return
-  fi
-
-  local response
-  response="$(fetch_text "${API_URL}")"
-  VERSION="$(printf '%s' "${response}" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-  if [[ -z "${VERSION}" ]]; then
-    echo "无法自动获取最新版本，请先设置 REPO_OWNER/REPO_NAME 或手动传入 VERSION"
-    exit 1
-  fi
-  echo "${VERSION}"
+  echo "v0.5.1"
 }
 
 install_binary() {
@@ -249,6 +236,10 @@ public_base() {
   fi
 }
 
+generate_token() {
+  cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w "${1:-32}" | head -n 1
+}
+
 rawurlencode() {
   local string="${1}"
   local strlen=${#string}
@@ -319,15 +310,33 @@ list_links() {
   fi
   echo
   local i=1
-  while IFS='|' read -r name target source; do
+  # 修改 read 逻辑：兼容老版本 3 列和新版本 4 列 Token 格式
+  while IFS='|' read -r col1 col2 col3 col4; do
+    local token name target source
+    if [[ -n "${col4}" ]]; then
+      # 4 列格式: Token|名称|目标|来源
+      token="${col1}"
+      name="${col2}"
+      target="${col3}"
+      source="${col4}"
+    else
+      # 3 列格式: 名称|目标|来源
+      token="${i}" # 旧链接暂时以行号 fallback
+      name="${col1}"
+      target="${col2}"
+      source="${col3}"
+    fi
+
     [[ -z "${name}" ]] && continue
     local encoded
     encoded="$(rawurlencode "${source}")"
+    
+    # 修复 printf 的样式定义，变量作为参数传递，防止 URL 中的 % 报错
     printf "  ${BOLD}${CYAN}%d.${NC} %s\n" "$i" "${name}"
     printf "     ${DIM}目标:${NC} %s\n" "${target}"
     printf "     ${DIM}来源:${NC} %s\n" "${source}"
-    printf "     ${DIM}链接:${NC} ${DIM}%s/convert?target=${target}&url=${encoded}${NC}\n" "${base}"
-    printf "     ${DIM}短链:${NC} ${GREEN}%s/s/%d${NC}\n" "${base}" "$i"
+    printf "     ${DIM}链接:${NC} ${DIM}%s/convert?target=%s&url=%s${NC}\n" "${base}" "${target}" "${encoded}"
+    printf "     ${DIM}短链:${NC} ${GREEN}%s/s/%s${NC}\n" "${base}" "${token}"
     echo
     i=$((i+1))
   done < "${LINKS_FILE}"
@@ -345,8 +354,10 @@ add_link() {
     *) fail "不支持的目标客户端"; return 1 ;;
   esac
   [[ -z "${name}" || -z "${source}" ]] && { fail "名称和订阅URL不能为空"; return 1; }
-  echo "${name}|${target}|${source}" >> "${LINKS_FILE}"
-  ok "已添加"
+  local token
+  token="$(generate_token 32)"
+  echo "${token}|${name}|${target}|${source}" >> "${LINKS_FILE}"
+  ok "已添加 (Token: ${token})"
 }
 
 delete_link() {

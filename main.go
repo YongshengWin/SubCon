@@ -29,7 +29,7 @@ const (
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v0.5.0"
+	version               = "v0.5.1"
 )
 
 type config struct {
