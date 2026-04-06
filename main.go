@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
@@ -28,7 +29,7 @@ const (
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v0.4.9"
+	version               = "v0.5.0"
 )
 
 type config struct {
@@ -1030,12 +1031,6 @@ func handleShortLink(cfg config) http.HandlerFunc {
 			return
 		}
 
-		id, err := strconv.Atoi(idStr)
-		if err != nil || id < 1 {
-			http.Error(w, "invalid id", http.StatusBadRequest)
-			return
-		}
-
 		data, err := os.ReadFile(cfg.LinksFile)
 		if err != nil {
 			log.Printf("failed to read links file %s: %v", cfg.LinksFile, err)
@@ -1044,26 +1039,41 @@ func handleShortLink(cfg config) http.HandlerFunc {
 		}
 
 		lines := strings.Split(string(data), "\n")
-		var validLines []string
-		for _, line := range lines {
-			if strings.TrimSpace(line) != "" {
-				validLines = append(validLines, line)
+		var target, urlStr string
+		found := false
+
+		// 改进的查找逻辑：支持 Token 匹配，并向后兼容数字 ID 索引
+		for i, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			parts := strings.Split(line, "|")
+			
+			// 格式 A: Token|Title|Target|URL (4列)
+			if len(parts) >= 4 && parts[0] == idStr {
+				target = strings.TrimSpace(parts[2])
+				urlStr = strings.TrimSpace(parts[3])
+				found = true
+				break
+			}
+			
+			// 兼容格式 B: Title|Target|URL (3列) -> 仍然支持旧的数字 ID 访问
+			if len(parts) == 3 {
+				numericID, err := strconv.Atoi(idStr)
+				if err == nil && numericID == (i+1) {
+					target = strings.TrimSpace(parts[1])
+					urlStr = strings.TrimSpace(parts[2])
+					found = true
+					break
+				}
 			}
 		}
 
-		if id > len(validLines) {
+		if !found {
 			http.NotFound(w, r)
 			return
 		}
-
-		parts := strings.SplitN(validLines[id-1], "|", 3)
-		if len(parts) < 3 {
-			http.Error(w, "invalid link format", http.StatusInternalServerError)
-			return
-		}
-
-		target := strings.TrimSpace(parts[1])
-		urlStr := strings.TrimSpace(parts[2])
 
 		// 检测是否为代理客户端（Surge/Clash/Stash 等）
 		ua := strings.ToLower(r.Header.Get("User-Agent"))
@@ -1125,29 +1135,52 @@ func handleShortenAPI(cfg config) http.HandlerFunc {
 		defer linksFileMu.Unlock()
 
 		data, err := os.ReadFile(cfg.LinksFile)
-		var lines []string
-		if err == nil {
-			lines = strings.Split(string(data), "\n")
+		if err != nil && !os.IsNotExist(err) {
+			log.Printf("failed to read links file %s: %v", cfg.LinksFile, err)
 		}
+		lines := strings.Split(string(data), "\n")
+		
+		token := ""
+		needMigration := false
+		var newLines []string
 
-		var validLines []string
+		// 检查是否已有该链接，并顺便执行旧数据格式检查（迁移）
 		for _, line := range lines {
-			if strings.TrimSpace(line) != "" {
-				validLines = append(validLines, line)
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			parts := strings.Split(line, "|")
+			
+			if len(parts) == 3 {
+				// 旧格式检测：自动分配 Token
+				oldTitle, oldTarget, oldUrl := parts[0], parts[1], parts[2]
+				newToken := generateRandomToken(32)
+				newEntry := fmt.Sprintf("%s|%s|%s|%s", newToken, oldTitle, oldTarget, oldUrl)
+				newLines = append(newLines, newEntry)
+				needMigration = true
+				
+				if oldTarget == target && oldUrl == urlStr {
+					token = newToken
+				}
+			} else if len(parts) >= 4 {
+				// 新格式
+				newLines = append(newLines, line)
+				if parts[2] == target && parts[3] == urlStr {
+					token = parts[0]
+				}
 			}
 		}
 
-		newID := -1
-		for i, line := range validLines {
-			parts := strings.SplitN(line, "|", 3)
-			if len(parts) >= 3 && strings.TrimSpace(parts[1]) == target && strings.TrimSpace(parts[2]) == urlStr {
-				newID = i + 1
-				break
-			}
+		// 如果发现旧格式链接，立即保存迁移后的完整文件
+		if needMigration {
+			_ = os.WriteFile(cfg.LinksFile, []byte(strings.Join(newLines, "\n")+"\n"), 0644)
 		}
 
-		if newID == -1 {
-			newLine := fmt.Sprintf("网页生成|%s|%s\n", target, urlStr)
+		// 如果是全新的链接
+		if token == "" {
+			token = generateRandomToken(32)
+			newLine := fmt.Sprintf("%s|网页生成|%s|%s\n", token, target, urlStr)
 			f, err := os.OpenFile(cfg.LinksFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 			if err != nil {
 				log.Printf("failed to open links file %s: %v", cfg.LinksFile, err)
@@ -1160,15 +1193,27 @@ func handleShortenAPI(cfg config) http.HandlerFunc {
 				http.Error(w, "server error", http.StatusInternalServerError)
 				return
 			}
-			newID = len(validLines) + 1
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		shortPath := fmt.Sprintf("/s/%d", newID)
-		log.Printf("[DEBUG] Short link generated: %s (id: %d)", shortPath, newID)
+		shortPath := fmt.Sprintf("/s/%s", token)
+		log.Printf("[DEBUG] Secure short link generated: %s", shortPath)
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":  true,
 			"shortUrl": shortPath,
 		})
 	}
+}
+
+// generateRandomToken 生成指定长度的随机 Token
+func generateRandomToken(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	for i := range b {
+		b[i] = charset[int(b[i])%len(charset)]
+	}
+	return string(b)
 }
