@@ -1079,6 +1079,8 @@ func handleShortenAPI(cfg config) http.HandlerFunc {
 			return
 		}
 
+		log.Printf("[Shorten API] Request received from %s", r.RemoteAddr)
+
 		var req shortenRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
