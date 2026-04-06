@@ -469,20 +469,55 @@ setup_shared_cert() {
   echo
 
   local found_certs=()
-  for d in /root/cert/*/fullchain.pem /root/.acme.sh/*_ecc/fullchain.cer; do
+  for d in /root/cert/*/fullchain.pem /root/.acme.sh/*_ecc/fullchain.cer /root/.acme.sh/*/fullchain.cer; do
     [[ -f "$d" ]] && found_certs+=("$d")
   done
+
+  local cert_choice=""
   if [[ ${#found_certs[@]} -gt 0 ]]; then
-    ok "检测到以下证书文件:"
+    ok "自动检测到已有的证书文件:"
+    local i=1
     for f in "${found_certs[@]}"; do
-      printf "    ${GREEN}%s${NC}\n" "${f}"
+      printf "  ${BOLD}${CYAN}%d.${NC} %s\n" "$i" "${f}"
+      ((i++))
     done
     echo
   fi
 
-  read -r -p "$(printf "${CYAN}域名${NC}(例如 sub.example.com): ")" domain
-  read -r -p "$(printf "${CYAN}证书文件路径${NC}(fullchain.pem): ")" cert
-  read -r -p "$(printf "${CYAN}私钥文件路径${NC}(privkey.pem): ")" key
+  read -r -p "$(printf "${CYAN}面板绑定域名${NC}(例如 sub.example.com): ")" domain
+  
+  if [[ ${#found_certs[@]} -gt 0 ]]; then
+    read -r -p "$(printf "${CYAN}请选择证书序号${NC}(或直接粘贴完整路径): ")" cert_choice
+  else
+    read -r -p "$(printf "${CYAN}请输入证书文件绝对路径${NC}(如 fullchain.pem): ")" cert_choice
+  fi
+
+  if [[ "${cert_choice}" =~ ^[0-9]+$ ]] && [ "${cert_choice}" -gt 0 ] && [ "${cert_choice}" -le "${#found_certs[@]}" ]; then
+    cert="${found_certs[$((cert_choice-1))]}"
+  else
+    cert="${cert_choice}"
+  fi
+
+  local cert_dir
+  cert_dir="$(dirname "${cert}" 2>/dev/null || echo "")"
+  if [[ -n "${cert_dir}" && -d "${cert_dir}" ]]; then
+    if [[ -f "${cert_dir}/privkey.pem" ]]; then
+      key="${cert_dir}/privkey.pem"
+    else
+      local found_key
+      found_key="$(ls "${cert_dir}"/*.key 2>/dev/null | head -n1)"
+      if [[ -n "${found_key}" ]]; then
+         key="${found_key}"
+      fi
+    fi
+  fi
+
+  if [[ -n "${key:-}" && -f "${key}" ]]; then
+    ok "已自动匹配私钥: ${key}"
+  else
+    read -r -p "$(printf "${CYAN}无法自动识别私钥，请输入私钥文件绝对路径${NC}(如 privkey.pem): ")" key
+  fi
+
   read -r -p "$(printf "${CYAN}监听端口${NC}(默认 ${GREEN}8443${NC}，Cloudflare 兼容): ")" port
   port="${port:-8443}"
 
