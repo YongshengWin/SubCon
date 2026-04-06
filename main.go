@@ -23,12 +23,12 @@ const (
 	defaultListen         = "0.0.0.0"
 	defaultPort           = "8090"
 	defaultTestURL        = "http://www.gstatic.com/generate_204"
-	defaultUserAgent      = "surge-sub-converter/0.4.8"
+	defaultUserAgent      = "surge-sub-converter/0.4.9"
 	defaultFetchTimeout   = 15 * time.Second
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v0.4.8"
+	version               = "v0.4.9"
 )
 
 type config struct {
@@ -1076,33 +1076,13 @@ func handleShortLink(cfg config) http.HandlerFunc {
 			strings.Contains(ua, "sing-box")
 
 		if isProxyClient {
-			// 代理客户端：直接透传原始订阅内容，不做格式转换。
-			// 原始订阅返回 Base64 或原始 vmess/vless 链接列表，
-			// Surge policy-path 可直接解析，和其他厂商订阅服务行为一致。
-			req, err := http.NewRequest(http.MethodGet, urlStr, nil)
-			if err != nil {
-				http.Error(w, "invalid subscription url", http.StatusBadRequest)
-				return
-			}
-			req.Header.Set("User-Agent", r.Header.Get("User-Agent"))
-			resp, err := cfg.HTTPClient.Do(req)
-			if err != nil {
-				http.Error(w, "failed to fetch subscription", http.StatusBadGateway)
-				return
-			}
-			defer resp.Body.Close()
-			// 透传订阅相关 Header
-			for _, h := range []string{"Subscription-Userinfo", "Profile-Update-Interval", "Profile-Title", "Content-Type"} {
-				if v := resp.Header.Get(h); v != "" {
-					w.Header().Set(h, v)
-				}
-			}
-			w.WriteHeader(resp.StatusCode)
-			_, _ = io.Copy(w, resp.Body)
-			return
+			// 如果是代理客户端(Surge等)访问，自动追加 list=true 以触发纯代理行输出
+			q := r.URL.Query()
+			q.Set("list", "true")
+			r.URL.RawQuery = q.Encode()
 		}
 
-		// 浏览器等普通客户端：走正常转换流程，返回目标格式配置文件
+		// 走正常转换流程
 		q := r.URL.Query()
 		q.Set("target", target)
 		q.Set("url", urlStr)
