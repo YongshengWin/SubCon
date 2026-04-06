@@ -140,7 +140,7 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!DOCTYPE html>
 <body>
   <div class="shell">
     <div class="panel">
-      <h1>订阅转换</h1>
+      <h1>订阅转换 [v0.3.8 终极版]</h1>
       <p>输入原始订阅 URL，选择目标客户端，直接生成转换链接。</p>
 
       <div class="field">
@@ -178,7 +178,7 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!DOCTYPE html>
         <pre id="output">等待生成...</pre>
       </div>
 
-      <div class="version-tag">v0.3.7 MEGA DEBUG</div>
+      <div class="version-tag">v0.3.8 ULTIMATE</div>
     </div>
   </div>
 
