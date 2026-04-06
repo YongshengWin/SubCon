@@ -31,7 +31,7 @@
 推荐使用发布版安装脚本，目标机不需要 Go：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/YongshengWin/SubCon/main/tools/surge_sub_converter/install-release.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/YongshengWin/SubCon/main/install-release.sh)
 ```
 
 如果仓库信息不是默认值，也可以显式传入：

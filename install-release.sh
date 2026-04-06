@@ -191,8 +191,8 @@ load_env() {
   SUB_RAW_BASE="${SUB_RAW_BASE:-https://raw.githubusercontent.com/${SUB_REPO_OWNER}/${SUB_REPO_NAME}/${SUB_REPO_BRANCH}}"
   SUB_RELEASE_BASE="${SUB_RELEASE_BASE:-https://github.com/${SUB_REPO_OWNER}/${SUB_REPO_NAME}/releases/download}"
   SUB_RELEASE_API="${SUB_RELEASE_API:-https://api.github.com/repos/${SUB_REPO_OWNER}/${SUB_REPO_NAME}/releases/latest}"
-  REMOTE_INSTALL_URL="${SUB_RAW_BASE}/tools/surge_sub_converter/install-release.sh"
-  REMOTE_UNINSTALL_URL="${SUB_RAW_BASE}/tools/surge_sub_converter/uninstall.sh"
+  REMOTE_INSTALL_URL="${SUB_RAW_BASE}/install-release.sh"
+  REMOTE_UNINSTALL_URL="${SUB_RAW_BASE}/uninstall.sh"
 }
 
 save_env() {
