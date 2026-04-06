@@ -29,7 +29,7 @@ const (
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v0.6.4"
+	version               = "v0.6.5"
 )
 
 type config struct {
@@ -1254,7 +1254,9 @@ func handleShortenAPI(cfg config) http.HandlerFunc {
 		// 如果是全新的链接
 		if token == "" {
 			token = generateRandomToken(32)
-			newLine := fmt.Sprintf("%s|网页生成|%s|%s\n", token, target, urlStr)
+			// 使用带时间戳的默认名称替代单一的“网页生成”
+			title := time.Now().Format("聚合订阅-0102-1504")
+			newLine := fmt.Sprintf("%s|%s|%s|%s\n", token, title, target, urlStr)
 			f, err := os.OpenFile(cfg.LinksFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 			if err != nil {
 				log.Printf("failed to open links file %s: %v", cfg.LinksFile, err)

@@ -97,7 +97,7 @@ detect_public_ip() {
 }
 
 detect_version() {
-  VERSION="v0.6.4"
+  VERSION="v0.6.5"
   echo "${VERSION}"
 }
 
@@ -753,16 +753,16 @@ uninstall_service() {
 menu() {
   show_header
 
-  printf "  ${DIM}── 订阅管理 ─────────────────────────${NC}\n"
-  printf "   ${BOLD}1.${NC}  查看订阅链接\n"
-  printf "   ${BOLD}2.${NC}  添加转换订阅链接\n"
-  printf "   ${BOLD}3.${NC}  删除转换订阅链接\n"
-  echo
   printf "  ${DIM}── 基础管理 ─────────────────────────${NC}\n"
-  printf "   ${BOLD}4.${NC}  更新服务\n"
-  printf "   ${BOLD}5.${NC}  查看服务状态\n"
-  printf "   ${BOLD}6.${NC}  重启服务\n"
-  printf "   ${BOLD}7.${NC}  卸载服务\n"
+  printf "   ${BOLD}1.${NC}  更新服务\n"
+  printf "   ${BOLD}2.${NC}  查看服务状态\n"
+  printf "   ${BOLD}3.${NC}  重启服务\n"
+  printf "   ${BOLD}4.${NC}  卸载服务\n"
+  echo
+  printf "  ${DIM}── 订阅管理 ─────────────────────────${NC}\n"
+  printf "   ${BOLD}5.${NC}  查看订阅链接\n"
+  printf "   ${BOLD}6.${NC}  添加转换订阅链接\n"
+  printf "   ${BOLD}7.${NC}  删除转换订阅链接\n"
   echo
   printf "  ${DIM}── 网络设置 ─────────────────────────${NC}\n"
   printf "   ${BOLD}8.${NC}  HTTPS / 域名设置\n"
@@ -772,13 +772,13 @@ menu() {
   echo
   read -r -p "$(printf "${CYAN}请输入数字: ${NC}")" choice
   case "${choice}" in
-    1) list_links ;;
-    2) add_link ;;
-    3) delete_link ;;
-    4) update_service ;;
-    5) show_status ;;
-    6) restart_service ;;
-    7) uninstall_service ;;
+    1) update_service ;;
+    2) show_status ;;
+    3) restart_service ;;
+    4) uninstall_service ;;
+    5) list_links ;;
+    6) add_link ;;
+    7) delete_link ;;
     8) https_menu ;;
     9) bind_public_ip ;;
     0) exit 0 ;;
@@ -788,13 +788,13 @@ menu() {
 
 if [[ $# -gt 0 ]]; then
   case "$1" in
-    1|list) list_links ;;
-    2|add) add_link ;;
-    3|delete|del|remove) delete_link ;;
-    4|update) update_service ;;
-    5|status) show_status ;;
-    6|restart) restart_service ;;
-    7|uninstall) uninstall_service ;;
+    1|update) update_service ;;
+    2|status) show_status ;;
+    3|restart) restart_service ;;
+    4|uninstall) uninstall_service ;;
+    5|list) list_links ;;
+    6|add) add_link ;;
+    7|delete|del|remove) delete_link ;;
     8|domain|https|port|ssl|cert|proxy|tls|native-https) https_menu ;;
     9|bind-ip|ip) bind_public_ip ;;
     *) menu ;;
