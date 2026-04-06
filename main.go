@@ -23,12 +23,12 @@ const (
 	defaultListen         = "0.0.0.0"
 	defaultPort           = "8090"
 	defaultTestURL        = "http://www.gstatic.com/generate_204"
-	defaultUserAgent      = "surge-sub-converter/0.4.1"
+	defaultUserAgent      = "surge-sub-converter/0.4.2"
 	defaultFetchTimeout   = 15 * time.Second
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v0.4.1"
+	version               = "v0.4.2"
 )
 
 type config struct {
