@@ -23,12 +23,12 @@ const (
 	defaultListen         = "0.0.0.0"
 	defaultPort           = "8090"
 	defaultTestURL        = "http://www.gstatic.com/generate_204"
-	defaultUserAgent      = "surge-sub-converter/0.4.3"
+	defaultUserAgent      = "surge-sub-converter/0.4.4"
 	defaultFetchTimeout   = 15 * time.Second
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v0.4.3"
+	version               = "v0.4.4"
 )
 
 type config struct {
@@ -1074,6 +1074,19 @@ func handleShortLink(cfg config) http.HandlerFunc {
 		q := r.URL.Query()
 		q.Set("target", target)
 		q.Set("url", urlStr)
+		// 自动检测代理客户端 User-Agent，透明切换到纯代理行模式，
+		// 无需用户手动添加 ?list=true 参数，行为与其他厂商订阅服务一致。
+		ua := strings.ToLower(r.Header.Get("User-Agent"))
+		isProxyClient := strings.Contains(ua, "surge") ||
+			strings.Contains(ua, "clash") ||
+			strings.Contains(ua, "stash") ||
+			strings.Contains(ua, "quantumult") ||
+			strings.Contains(ua, "shadowrocket") ||
+			strings.Contains(ua, "loon") ||
+			strings.Contains(ua, "sing-box")
+		if isProxyClient {
+			q.Set("list", "true")
+		}
 		r.URL.RawQuery = q.Encode()
 
 		converterFunc(w, r)
