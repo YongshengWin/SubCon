@@ -23,12 +23,12 @@ const (
 	defaultListen         = "0.0.0.0"
 	defaultPort           = "8090"
 	defaultTestURL        = "http://www.gstatic.com/generate_204"
-	defaultUserAgent      = "surge-sub-converter/0.4.6"
+	defaultUserAgent      = "surge-sub-converter/0.4.7"
 	defaultFetchTimeout   = 15 * time.Second
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v0.4.6"
+	version               = "v0.4.7"
 )
 
 type config struct {
@@ -651,8 +651,8 @@ func renderSurge(nodes []proxyNode, opts requestOptions) string {
 		for _, node := range nodes {
 			lines = append(lines, renderNode(node))
 		}
-		// 将纯代理行通过 Base64 编码返回，避免任何 Emoji/换行符/特殊符号 被 Surge/Clash 解析截断
-		return base64.StdEncoding.EncodeToString([]byte(strings.Join(lines, "\n")))
+		// 根据用户的 Gemini 指导方案，直接返回纯文本行，不再做 Base64 编码
+		return strings.Join(lines, "\n")
 	}
 
 	groupMembers := make([]string, 0, len(nodes)+1)
