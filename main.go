@@ -23,12 +23,12 @@ const (
 	defaultListen         = "0.0.0.0"
 	defaultPort           = "8090"
 	defaultTestURL        = "http://www.gstatic.com/generate_204"
-	defaultUserAgent      = "surge-sub-converter/0.4.5"
+	defaultUserAgent      = "surge-sub-converter/0.4.6"
 	defaultFetchTimeout   = 15 * time.Second
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v0.4.5"
+	version               = "v0.4.6"
 )
 
 type config struct {
@@ -611,9 +611,7 @@ func buildCommonOptions(params map[string]string, opts requestOptions) []string 
 		options = append(options, "ws=true")
 		path := firstNonEmpty(params["path"], "/")
 		options = append(options, "ws-path="+path)
-		if host := params["host"]; host != "" {
-			options = append(options, "ws-headers=Host:"+host)
-		}
+        // 移除了 ws-headers=Host 避免在部分 Surge 版本引发语法错误，SNI 已经足够
 	case "grpc":
 		if serviceName := firstNonEmpty(params["serviceName"], params["service_name"]); serviceName != "" {
 			options = append(options, "grpc-service-name="+serviceName)
@@ -648,14 +646,13 @@ func withUniqueNames(nodes []proxyNode) []proxyNode {
 }
 
 func renderSurge(nodes []proxyNode, opts requestOptions) string {
-	// list=true 模式：仅返回纯代理行，不含 [General]/[Proxy Group]/[Rule] 章节，
-	// 供 Surge 外部策略组 (External Policy Group) 直接载入使用
 	if opts.ProxyListOnly {
 		lines := make([]string, 0, len(nodes))
 		for _, node := range nodes {
 			lines = append(lines, renderNode(node))
 		}
-		return strings.Join(lines, "\n")
+		// 将纯代理行通过 Base64 编码返回，避免任何 Emoji/换行符/特殊符号 被 Surge/Clash 解析截断
+		return base64.StdEncoding.EncodeToString([]byte(strings.Join(lines, "\n")))
 	}
 
 	groupMembers := make([]string, 0, len(nodes)+1)
