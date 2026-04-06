@@ -782,7 +782,8 @@ WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  systemctl enable --now "${APP_NAME}"
+  systemctl enable "${APP_NAME}"
+  systemctl restart "${APP_NAME}"
 }
 
 main() {
