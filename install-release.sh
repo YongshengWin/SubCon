@@ -141,7 +141,7 @@ EOF
 }
 
 install_ctl() {
-  cat > "${CTL_PATH}" <<'EOF'
+  cat > "${CTL_PATH}.tmp" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -758,6 +758,7 @@ else
   menu
 fi
 EOF
+  mv "${CTL_PATH}.tmp" "${CTL_PATH}"
   chmod 755 "${CTL_PATH}"
 }
 
