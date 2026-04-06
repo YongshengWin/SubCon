@@ -97,7 +97,18 @@ detect_public_ip() {
 }
 
 detect_version() {
-  VERSION="v0.5.1"
+  if [[ -n "${VERSION:-}" ]]; then
+    echo "${VERSION}"
+    return
+  fi
+
+  local response
+  response="$(fetch_text "${API_URL}")"
+  VERSION="$(printf '%s' "${response}" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+  if [[ -z "${VERSION}" ]]; then
+    echo "无法自动获取最新版本，请先设置 REPO_OWNER/REPO_NAME 或手动传入 VERSION"
+    exit 1
+  fi
   echo "${VERSION}"
 }
 
