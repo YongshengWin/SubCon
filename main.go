@@ -23,12 +23,12 @@ const (
 	defaultListen         = "0.0.0.0"
 	defaultPort           = "8090"
 	defaultTestURL        = "http://www.gstatic.com/generate_204"
-	defaultUserAgent      = "surge-sub-converter/0.4.2"
+	defaultUserAgent      = "surge-sub-converter/0.4.3"
 	defaultFetchTimeout   = 15 * time.Second
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v0.4.2"
+	version               = "v0.4.3"
 )
 
 type config struct {
@@ -211,6 +211,7 @@ type requestOptions struct {
 	AllowUDP       bool
 	SkipCertVerify bool
 	IncludeDirect  bool
+	ProxyListOnly  bool // list=true 时仅输出纯代理行，不含章节头，供 surge 外部策略组使用
 }
 
 func parseRequestOptions(r *http.Request, cfg config) requestOptions {
@@ -226,6 +227,7 @@ func parseRequestOptions(r *http.Request, cfg config) requestOptions {
 		AllowUDP:       parseBoolDefault(r.URL.Query().Get("udp"), true),
 		SkipCertVerify: parseBoolDefault(r.URL.Query().Get("skip_cert_verify"), true),
 		IncludeDirect:  parseBoolDefault(r.URL.Query().Get("direct"), true),
+		ProxyListOnly:  parseBoolDefault(r.URL.Query().Get("list"), false),
 	}
 }
 
@@ -646,6 +648,16 @@ func withUniqueNames(nodes []proxyNode) []proxyNode {
 }
 
 func renderSurge(nodes []proxyNode, opts requestOptions) string {
+	// list=true 模式：仅返回纯代理行，不含 [General]/[Proxy Group]/[Rule] 章节，
+	// 供 Surge 外部策略组 (External Policy Group) 直接载入使用
+	if opts.ProxyListOnly {
+		lines := make([]string, 0, len(nodes))
+		for _, node := range nodes {
+			lines = append(lines, renderNode(node))
+		}
+		return strings.Join(lines, "\n")
+	}
+
 	groupMembers := make([]string, 0, len(nodes)+1)
 	lines := []string{
 		"[General]",
