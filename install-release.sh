@@ -792,7 +792,6 @@ main() {
   local version
   target="$(detect_arch)"
   version="$(detect_version)"
-  VERSION="${version}"
   SSC_VERSION="${version}"
   install_binary "${target}" "${version}"
   write_env_file
@@ -800,8 +799,24 @@ main() {
   install_service
 
   echo
-  echo "安装完成"
-  echo "安装版本: ${version}"
+  ok "安装/更新完成 (版本: ${version})"
+  
+  if systemctl is-active --quiet "${APP_NAME}"; then
+    echo
+    printf "  ${YELLOW}▶ 注意: 检测到服务正在运行，需要重启以应用新版本。${NC}\n"
+    read -p "  是否立即重启服务? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+      systemctl restart "${APP_NAME}"
+      ok "服务已重启，新版本已生效。"
+    else
+      warn "已跳过重启。请记得稍后手动执行 'sub 7' 重启服务。"
+    fi
+  else
+    systemctl start "${APP_NAME}"
+    ok "服务已启动。"
+  fi
+
   if [[ -f "${ENV_FILE}" ]]; then
     # shellcheck disable=SC1090
     source "${ENV_FILE}"
@@ -816,9 +831,12 @@ main() {
   fi
   local base="${scheme}://${host}"
 
-  echo "前端页面: ${base}/"
-  echo "健康检查: ${base}/healthz"
-  echo "查看日志: journalctl -u ${APP_NAME} -f"
+  echo
+  divider
+  echo "  前端页面: ${base}/"
+  echo "  健康检查: ${base}/healthz"
+  echo "  管理命令: sub"
+  divider
 }
 
 main "$@"
