@@ -23,12 +23,12 @@ const (
 	defaultListen         = "0.0.0.0"
 	defaultPort           = "8090"
 	defaultTestURL        = "http://www.gstatic.com/generate_204"
-	defaultUserAgent      = "surge-sub-converter/0.4.4"
+	defaultUserAgent      = "surge-sub-converter/0.4.5"
 	defaultFetchTimeout   = 15 * time.Second
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v0.4.4"
+	version               = "v0.4.5"
 )
 
 type config struct {
@@ -1071,11 +1071,7 @@ func handleShortLink(cfg config) http.HandlerFunc {
 		target := strings.TrimSpace(parts[1])
 		urlStr := strings.TrimSpace(parts[2])
 
-		q := r.URL.Query()
-		q.Set("target", target)
-		q.Set("url", urlStr)
-		// 自动检测代理客户端 User-Agent，透明切换到纯代理行模式，
-		// 无需用户手动添加 ?list=true 参数，行为与其他厂商订阅服务一致。
+		// 检测是否为代理客户端（Surge/Clash/Stash 等）
 		ua := strings.ToLower(r.Header.Get("User-Agent"))
 		isProxyClient := strings.Contains(ua, "surge") ||
 			strings.Contains(ua, "clash") ||
@@ -1084,11 +1080,39 @@ func handleShortLink(cfg config) http.HandlerFunc {
 			strings.Contains(ua, "shadowrocket") ||
 			strings.Contains(ua, "loon") ||
 			strings.Contains(ua, "sing-box")
-		if isProxyClient {
-			q.Set("list", "true")
-		}
-		r.URL.RawQuery = q.Encode()
 
+		if isProxyClient {
+			// 代理客户端：直接透传原始订阅内容，不做格式转换。
+			// 原始订阅返回 Base64 或原始 vmess/vless 链接列表，
+			// Surge policy-path 可直接解析，和其他厂商订阅服务行为一致。
+			req, err := http.NewRequest(http.MethodGet, urlStr, nil)
+			if err != nil {
+				http.Error(w, "invalid subscription url", http.StatusBadRequest)
+				return
+			}
+			req.Header.Set("User-Agent", r.Header.Get("User-Agent"))
+			resp, err := cfg.HTTPClient.Do(req)
+			if err != nil {
+				http.Error(w, "failed to fetch subscription", http.StatusBadGateway)
+				return
+			}
+			defer resp.Body.Close()
+			// 透传订阅相关 Header
+			for _, h := range []string{"Subscription-Userinfo", "Profile-Update-Interval", "Profile-Title", "Content-Type"} {
+				if v := resp.Header.Get(h); v != "" {
+					w.Header().Set(h, v)
+				}
+			}
+			w.WriteHeader(resp.StatusCode)
+			_, _ = io.Copy(w, resp.Body)
+			return
+		}
+
+		// 浏览器等普通客户端：走正常转换流程，返回目标格式配置文件
+		q := r.URL.Query()
+		q.Set("target", target)
+		q.Set("url", urlStr)
+		r.URL.RawQuery = q.Encode()
 		converterFunc(w, r)
 	}
 }
