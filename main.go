@@ -90,6 +90,7 @@ func main() {
 	mux.HandleFunc("/healthz", handleHealthz)
 	mux.HandleFunc("/convert", handleConvert(cfg, false))
 	mux.HandleFunc("/api/convert", handleConvert(cfg, true))
+	mux.HandleFunc("/api/shorten", handleShortenAPI(cfg))
 	mux.HandleFunc("/s/", handleShortLink(cfg))
 
 	addr := cfg.Listen + ":" + cfg.Port
@@ -1060,5 +1061,83 @@ func handleShortLink(cfg config) http.HandlerFunc {
 		r.URL.RawQuery = q.Encode()
 
 		converterFunc(w, r)
+	}
+}
+
+var linksFileMu sync.Mutex
+
+type shortenRequest struct {
+	Target string `json:"target"`
+	URL    string `json:"url"`
+}
+
+func handleShortenAPI(cfg config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req shortenRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		target := strings.TrimSpace(req.Target)
+		urlStr := strings.TrimSpace(req.URL)
+		if target == "" || urlStr == "" {
+			http.Error(w, "target and url are required", http.StatusBadRequest)
+			return
+		}
+
+		linksFileMu.Lock()
+		defer linksFileMu.Unlock()
+
+		data, err := os.ReadFile(cfg.LinksFile)
+		var lines []string
+		if err == nil {
+			lines = strings.Split(string(data), "\n")
+		}
+
+		var validLines []string
+		for _, line := range lines {
+			if strings.TrimSpace(line) != "" {
+				validLines = append(validLines, line)
+			}
+		}
+
+		newID := -1
+		for i, line := range validLines {
+			parts := strings.SplitN(line, "|", 3)
+			if len(parts) >= 3 && strings.TrimSpace(parts[1]) == target && strings.TrimSpace(parts[2]) == urlStr {
+				newID = i + 1
+				break
+			}
+		}
+
+		if newID == -1 {
+			newLine := fmt.Sprintf("网页生成|%s|%s\n", target, urlStr)
+			f, err := os.OpenFile(cfg.LinksFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				log.Printf("failed to open links file %s: %v", cfg.LinksFile, err)
+				http.Error(w, "server error", http.StatusInternalServerError)
+				return
+			}
+			defer f.Close()
+			if _, err := f.WriteString(newLine); err != nil {
+				log.Printf("failed to write links file: %v", err)
+				http.Error(w, "server error", http.StatusInternalServerError)
+				return
+			}
+			newID = len(validLines) + 1
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		shortPath := fmt.Sprintf("/s/%d", newID)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":  true,
+			"shortUrl": shortPath,
+		})
 	}
 }

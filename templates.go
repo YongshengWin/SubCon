@@ -232,6 +232,21 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!DOCTYPE html>
         renderPills(data);
         el.output.textContent = data.config || '';
         setStatus('转换完成。', 'ok');
+
+        try {
+          const targetKey = el.target.value || '{{.DefaultTarget}}';
+          const shortResp = await fetch('/api/shorten', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target: targetKey, url: source })
+          });
+          const shortData = await shortResp.json();
+          if (shortData.success && shortData.shortUrl) {
+            el.convertLink.value = window.location.origin + shortData.shortUrl;
+          }
+        } catch (e) {
+          console.error('Failed to get short URL', e);
+        }
       } catch (err) {
         renderPills({ nodeCount: 0, ignoredTypes: [] });
         el.output.textContent = '转换失败';
