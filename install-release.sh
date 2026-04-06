@@ -801,19 +801,11 @@ main() {
   echo
   echo "安装完成"
   echo "安装版本: ${version}"
-  local public_ip
-  public_ip="$(detect_public_ip)"
-  echo "管理命令: sub"
-  if [[ -n "${PUBLIC_HOST}" ]]; then
-    echo "前端页面: ${PUBLIC_SCHEME}://${PUBLIC_HOST}/"
-  elif [[ -n "${PUBLIC_IP}" ]]; then
-    echo "前端页面: http://${PUBLIC_IP}:${APP_PORT}/"
-  elif [[ -n "${public_ip}" ]]; then
-    echo "前端页面: http://${public_ip}:${APP_PORT}/"
-  else
-    echo "前端页面: http://你的服务器IP:${APP_PORT}/"
-  fi
-  echo "健康检查: http://127.0.0.1:${APP_PORT}/healthz"
+  load_env
+  local base
+  base="$(public_base)"
+  echo "前端页面: ${base}/"
+  echo "健康检查: http://127.0.0.1:${SSC_PORT:-8090}/healthz"
   echo "查看日志: journalctl -u ${APP_NAME} -f"
 }
 
