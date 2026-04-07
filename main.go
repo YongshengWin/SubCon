@@ -828,13 +828,13 @@ func renderClashLike(nodes []proxyNode, opts requestOptions) string {
 	// 国外业务：节点选择优先
 	intlGroups := []string{"Google", "YouTube", "ChatGPT", "Claude", "Netflix", "Spotify", "Telegram"}
 	for _, g := range intlGroups {
-		sb.WriteString(fmt.Sprintf("  - { name: '%s', type: select, proxies: [节点选择, 自动选择, DIRECT, %s] }\n", g, allNodes))
+		sb.WriteString(fmt.Sprintf("  - { name: '%s', type: select, proxies: ['节点选择', '自动选择', 'DIRECT', %s] }\n", g, allNodes))
 	}
 
 	// 国内/大厂业务：DIRECT 优先
 	directFirstGroups := []string{"微软服务", "哔哩哔哩", "115"}
 	for _, g := range directFirstGroups {
-		sb.WriteString(fmt.Sprintf("  - { name: '%s', type: select, proxies: [DIRECT, 节点选择, 自动选择, %s] }\n", g, allNodes))
+		sb.WriteString(fmt.Sprintf("  - { name: '%s', type: select, proxies: ['DIRECT', '节点选择', '自动选择', %s] }\n", g, allNodes))
 	}
 
 	// 路由规则
