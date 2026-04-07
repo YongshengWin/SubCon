@@ -762,34 +762,117 @@ func renderSurge(nodes []proxyNode, opts requestOptions) string {
 }
 
 func renderClashLike(nodes []proxyNode, opts requestOptions) string {
-	lines := []string{
-		"mixed-port: 7890",
-		"allow-lan: true",
-		"mode: rule",
-		"log-level: info",
-		"",
-		"proxies:",
+	// 构建节点名称列表（YAML 安全字符串格式）
+	nodeYAML := make([]string, len(nodes))
+	for i, n := range nodes {
+		nodeYAML[i] = yamlString(n.Name)
 	}
+	allNodes := strings.Join(nodeYAML, ", ")
+
+	// 各策略组所需节点拼接辅助函数
+	groupWith := func(prefix []string, suffix []string) string {
+		parts := make([]string, 0, len(prefix)+len(nodes)+len(suffix))
+		parts = append(parts, prefix...)
+		parts = append(parts, nodeYAML...)
+		parts = append(parts, suffix...)
+		return strings.Join(parts, ", ")
+	}
+
+	// ── 输出 Clash 头部（DNS / hosts / 基础设置）──────────────────────
+	var sb strings.Builder
+	sb.WriteString(clashHeader)
+
+	// ── proxies 块：动态输出订阅节点 ─────────────────────────────────
+	sb.WriteString("\nproxies:\n")
 	for _, node := range nodes {
-		lines = append(lines, renderClashProxy(node)...)
+		for _, line := range renderClashProxy(node) {
+			sb.WriteString(line)
+			sb.WriteByte('\n')
+		}
 	}
-	groupMembers := make([]string, 0, len(nodes)+1)
-	for _, node := range nodes {
-		groupMembers = append(groupMembers, yamlString(node.Name))
-	}
+
+	// ── proxy-groups 块：17 个策略组，节点来自订阅 ────────────────────
+	autoTestURL := yamlString(opts.TestURL)
+	sb.WriteString("\nproxy-groups:\n")
+
+	// 节点选择（总入口：自动选择 + 全节点 + DIRECT）
+	mainProxies := groupWith([]string{yamlString("自动选择")}, nil)
 	if opts.IncludeDirect {
-		groupMembers = append(groupMembers, yamlString("DIRECT"))
+		mainProxies += ", " + yamlString("DIRECT")
 	}
-	lines = append(lines,
-		"",
-		"proxy-groups:",
-		fmt.Sprintf("  - { name: %s, type: select, proxies: [%s] }", yamlString(opts.PolicyName), strings.Join(groupMembers, ", ")),
-		fmt.Sprintf("  - { name: %s, type: url-test, url: %s, interval: 600, tolerance: 150, proxies: [%s] }", yamlString("Auto"), yamlString(opts.TestURL), strings.Join(groupMembers, ", ")),
-		"",
-		"rules:",
-		fmt.Sprintf("  - MATCH,%s", opts.PolicyName),
-	)
-	return strings.Join(lines, "\n")
+	sb.WriteString(fmt.Sprintf("  - { name: '节点选择', type: select, proxies: [%s] }\n", mainProxies))
+
+	// 自动选择（url-test，全节点）
+	sb.WriteString(fmt.Sprintf(
+		"  - { name: '自动选择', type: url-test, proxies: [%s], url: 'http://www.YouTube.com', interval: 600, tolerance: 20 }\n",
+		allNodes,
+	))
+
+	// AI / 内容服务（全节点可选）
+	aiGroups := []string{"ChatGPT", "Gemini", "Copilot"}
+	for _, g := range aiGroups {
+		sb.WriteString(fmt.Sprintf(
+			"  - { name: '%s', type: select, proxies: [%s] }\n",
+			g, groupWith([]string{yamlString("节点选择")}, nil),
+		))
+	}
+
+	// 流媒体
+	sb.WriteString(fmt.Sprintf(
+		"  - { name: 'Netflix', type: select, proxies: [%s] }\n",
+		groupWith([]string{yamlString("节点选择")}, nil),
+	))
+	sb.WriteString(fmt.Sprintf(
+		"  - { name: 'TikTok', type: select, proxies: [%s] }\n",
+		allNodes, // TikTok 仅直接代理节点，不走节点选择间接
+	))
+
+	// 社交 / 通讯
+	socialGroups := []string{"Telegram", "Twitter", "WhatsApp"}
+	for _, g := range socialGroups {
+		sb.WriteString(fmt.Sprintf(
+			"  - { name: '%s', type: select, proxies: [%s] }\n",
+			g, groupWith([]string{yamlString("节点选择")}, nil),
+		))
+	}
+
+	// 大厂服务（DIRECT 优先）
+	directFirstGroups := []string{"谷歌服务", "Steam"}
+	for _, g := range directFirstGroups {
+		sb.WriteString(fmt.Sprintf(
+			"  - { name: '%s', type: select, proxies: [%s] }\n",
+			g, groupWith([]string{yamlString("节点选择"), yamlString("DIRECT")}, nil),
+		))
+	}
+
+	// 微软 / 苹果（DIRECT 优先）
+	techDomesticGroups := []string{"微软服务", "苹果服务"}
+	for _, g := range techDomesticGroups {
+		sb.WriteString(fmt.Sprintf(
+			"  - { name: '%s', type: select, proxies: [%s] }\n",
+			g, groupWith([]string{yamlString("DIRECT"), yamlString("节点选择")}, nil),
+		))
+	}
+
+	// 国内内容平台（DIRECT 优先）
+	directPrimaryGroups := []string{"哔哩哔哩", "抖音"}
+	for _, g := range directPrimaryGroups {
+		sb.WriteString(fmt.Sprintf(
+			"  - { name: '%s', type: select, proxies: [%s] }\n",
+			g, groupWith([]string{yamlString("DIRECT"), yamlString("节点选择")}, nil),
+		))
+	}
+
+	// 磁力下载（固定直连）
+	sb.WriteString("  - { name: '磁力下载', type: select, proxies: ['DIRECT'] }\n")
+
+	// ── rules 块：完整规则集（来自模板，含谷歌/苹果/Netflix 等分流）──
+	_ = autoTestURL // 已在 url-test 组使用
+	sb.WriteByte('\n')
+	sb.WriteString(clashRulesBlock)
+	sb.WriteByte('\n')
+
+	return sb.String()
 }
 
 func renderQuantumultX(nodes []proxyNode, opts requestOptions) string {
