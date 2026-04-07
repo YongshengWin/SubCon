@@ -667,14 +667,18 @@ func buildCommonOptions(params map[string]string, opts requestOptions) []string 
 			options = append(options, "skip-cert-verify=true")
 		}
 	}
-	// 移除 ALPN：因为 3x-ui 经常返回 "h2,http/1.1" 含有逗号，会导致 Surge 的 proxyline 解析混乱崩溃
 
 	switch transport {
 	case "ws":
 		options = append(options, "ws=true")
 		path := firstNonEmpty(params["path"], "/")
 		options = append(options, "ws-path="+path)
-        // 移除了 ws-headers=Host 避免在部分 Surge 版本引发语法错误，SNI 已经足够
+		
+		// 恢复 ws-headers: Host，避免 CDN 节点因缺失 Host 无法连接的情况
+		host := firstNonEmpty(params["host"])
+		if host != "" {
+			options = append(options, "ws-headers=Host:"+host)
+		}
 	case "grpc":
 		if serviceName := firstNonEmpty(params["serviceName"], params["service_name"]); serviceName != "" {
 			options = append(options, "grpc-service-name="+serviceName)
@@ -762,27 +766,18 @@ func renderSurge(nodes []proxyNode, opts requestOptions) string {
 }
 
 func renderClashLike(nodes []proxyNode, opts requestOptions) string {
-	// 构建节点名称列表（YAML 安全字符串格式）
 	nodeYAML := make([]string, len(nodes))
 	for i, n := range nodes {
 		nodeYAML[i] = yamlString(n.Name)
 	}
 	allNodes := strings.Join(nodeYAML, ", ")
 
-	// 各策略组所需节点拼接辅助函数
-	groupWith := func(prefix []string, suffix []string) string {
-		parts := make([]string, 0, len(prefix)+len(nodes)+len(suffix))
-		parts = append(parts, prefix...)
-		parts = append(parts, nodeYAML...)
-		parts = append(parts, suffix...)
-		return strings.Join(parts, ", ")
-	}
-
-	// ── 输出 Clash 头部（DNS / hosts / 基础设置）──────────────────────
 	var sb strings.Builder
-	sb.WriteString(clashHeader)
+	
+	// 输出极简的 Clash/Meta 通用 Header，不使用几千行的累赘配置
+	sb.WriteString("port: 7890\nsocks-port: 7891\nallow-lan: false\nmode: rule\nlog-level: info\n")
 
-	// ── proxies 块：动态输出订阅节点 ─────────────────────────────────
+	// proxies 块：使用优雅的单行 JSON-like 格式输出，杜绝缩进及跨行错误
 	sb.WriteString("\nproxies:\n")
 	for _, node := range nodes {
 		for _, line := range renderClashProxy(node) {
@@ -791,86 +786,28 @@ func renderClashLike(nodes []proxyNode, opts requestOptions) string {
 		}
 	}
 
-	// ── proxy-groups 块：17 个策略组，节点来自订阅 ────────────────────
-	autoTestURL := yamlString(opts.TestURL)
+	// proxy-groups 块：简约但实用的分组体系，避免冗长的列表
 	sb.WriteString("\nproxy-groups:\n")
-
-	// 节点选择（总入口：自动选择 + 全节点 + DIRECT）
-	mainProxies := groupWith([]string{yamlString("自动选择")}, nil)
+	mainProxies := yamlString("自动选择")
 	if opts.IncludeDirect {
 		mainProxies += ", " + yamlString("DIRECT")
 	}
+	if len(nodeYAML) > 0 {
+		mainProxies += ", " + allNodes
+	}
+	
 	sb.WriteString(fmt.Sprintf("  - { name: '节点选择', type: select, proxies: [%s] }\n", mainProxies))
-
-	// 自动选择（url-test，全节点）
-	sb.WriteString(fmt.Sprintf(
-		"  - { name: '自动选择', type: url-test, proxies: [%s], url: 'http://www.YouTube.com', interval: 600, tolerance: 20 }\n",
-		allNodes,
-	))
-
-	// AI / 内容服务（全节点可选）
-	aiGroups := []string{"ChatGPT", "Gemini", "Copilot"}
-	for _, g := range aiGroups {
-		sb.WriteString(fmt.Sprintf(
-			"  - { name: '%s', type: select, proxies: [%s] }\n",
-			g, groupWith([]string{yamlString("节点选择")}, nil),
-		))
+	if len(nodeYAML) > 0 {
+		sb.WriteString(fmt.Sprintf("  - { name: '自动选择', type: url-test, proxies: [%s], url: 'http://www.gstatic.com/generate_204', interval: 300 }\n", allNodes))
+	} else {
+		sb.WriteString("  - { name: '自动选择', type: select, proxies: ['DIRECT'] }\n")
 	}
 
-	// 流媒体
-	sb.WriteString(fmt.Sprintf(
-		"  - { name: 'Netflix', type: select, proxies: [%s] }\n",
-		groupWith([]string{yamlString("节点选择")}, nil),
-	))
-	sb.WriteString(fmt.Sprintf(
-		"  - { name: 'TikTok', type: select, proxies: [%s] }\n",
-		allNodes, // TikTok 仅直接代理节点，不走节点选择间接
-	))
-
-	// 社交 / 通讯
-	socialGroups := []string{"Telegram", "Twitter", "WhatsApp"}
-	for _, g := range socialGroups {
-		sb.WriteString(fmt.Sprintf(
-			"  - { name: '%s', type: select, proxies: [%s] }\n",
-			g, groupWith([]string{yamlString("节点选择")}, nil),
-		))
-	}
-
-	// 大厂服务（DIRECT 优先）
-	directFirstGroups := []string{"谷歌服务", "Steam"}
-	for _, g := range directFirstGroups {
-		sb.WriteString(fmt.Sprintf(
-			"  - { name: '%s', type: select, proxies: [%s] }\n",
-			g, groupWith([]string{yamlString("节点选择"), yamlString("DIRECT")}, nil),
-		))
-	}
-
-	// 微软 / 苹果（DIRECT 优先）
-	techDomesticGroups := []string{"微软服务", "苹果服务"}
-	for _, g := range techDomesticGroups {
-		sb.WriteString(fmt.Sprintf(
-			"  - { name: '%s', type: select, proxies: [%s] }\n",
-			g, groupWith([]string{yamlString("DIRECT"), yamlString("节点选择")}, nil),
-		))
-	}
-
-	// 国内内容平台（DIRECT 优先）
-	directPrimaryGroups := []string{"哔哩哔哩", "抖音"}
-	for _, g := range directPrimaryGroups {
-		sb.WriteString(fmt.Sprintf(
-			"  - { name: '%s', type: select, proxies: [%s] }\n",
-			g, groupWith([]string{yamlString("DIRECT"), yamlString("节点选择")}, nil),
-		))
-	}
-
-	// 磁力下载（固定直连）
-	sb.WriteString("  - { name: '磁力下载', type: select, proxies: ['DIRECT'] }\n")
-
-	// ── rules 块：完整规则集（来自模板，含谷歌/苹果/Netflix 等分流）──
-	_ = autoTestURL // 已在 url-test 组使用
-	sb.WriteByte('\n')
-	sb.WriteString(clashRulesBlock)
-	sb.WriteByte('\n')
+	// rules 块：仅包含必需的核心路由规则，其它未匹配直接走代理节点
+	sb.WriteString("\nrules:\n")
+	sb.WriteString("  - GEOIP,LAN,DIRECT,no-resolve\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,local,DIRECT\n")
+	sb.WriteString("  - MATCH,节点选择\n")
 
 	return sb.String()
 }
@@ -909,58 +846,62 @@ func renderNode(node proxyNode) string {
 
 func renderClashProxy(node proxyNode) []string {
 	opts := parseOptionPairs(node.Options)
-	lines := []string{
-		fmt.Sprintf("  - name: %s", yamlString(node.Name)),
-		fmt.Sprintf("    type: %s", yamlString(node.SurgeType)),
-		fmt.Sprintf("    server: %s", yamlString(node.Host)),
-		fmt.Sprintf("    port: %d", node.Port),
-	}
+	
+	// 使用单行括号格式 (Flow style) 输出 proxy，完全避免由于字符串换行导致的 alterId missing 解析错误
+	var parts []string
+	parts = append(parts, fmt.Sprintf("name: %s", yamlString(node.Name)))
+	parts = append(parts, fmt.Sprintf("type: %s", node.SurgeType))
+	parts = append(parts, fmt.Sprintf("server: %s", node.Host))
+	parts = append(parts, fmt.Sprintf("port: %d", node.Port))
+
 	switch node.SurgeType {
 	case "vmess":
-		lines = append(lines,
-			fmt.Sprintf("    uuid: %s", yamlString(opts["username"])),
-			"    alterId: 0",
-			"    cipher: auto",
-		)
+		parts = append(parts, fmt.Sprintf("uuid: %s", opts["username"]))
+		parts = append(parts, "alterId: 0")
+		parts = append(parts, "cipher: auto")
 	case "vless":
-		lines = append(lines, fmt.Sprintf("    uuid: %s", yamlString(opts["username"])))
+		parts = append(parts, fmt.Sprintf("uuid: %s", opts["username"]))
 		if flow := opts["flow"]; flow != "" {
-			lines = append(lines, fmt.Sprintf("    flow: %s", yamlString(flow)))
+			parts = append(parts, fmt.Sprintf("flow: %s", flow))
 		}
 	case "trojan":
-		lines = append(lines, fmt.Sprintf("    password: %s", yamlString(opts["password"])))
+		parts = append(parts, fmt.Sprintf("password: %s", opts["password"]))
 	case "ss":
-		lines = append(lines,
-			fmt.Sprintf("    cipher: %s", yamlString(opts["encrypt-method"])),
-			fmt.Sprintf("    password: %s", yamlString(opts["password"])),
-		)
+		parts = append(parts, fmt.Sprintf("cipher: %s", opts["encrypt-method"]))
+		parts = append(parts, fmt.Sprintf("password: %s", opts["password"]))
 	}
+
 	if isTrue(opts["tls"]) {
-		lines = append(lines, "    tls: true")
+		parts = append(parts, "tls: true")
 	}
 	if sni := opts["sni"]; sni != "" {
-		lines = append(lines, fmt.Sprintf("    servername: %s", yamlString(sni)))
+		parts = append(parts, fmt.Sprintf("servername: %s", sni))
 	}
 	if isTrue(opts["skip-cert-verify"]) {
-		lines = append(lines, "    skip-cert-verify: true")
+		parts = append(parts, "skip-cert-verify: true")
 	}
 	if isTrue(opts["udp-relay"]) {
-		lines = append(lines, "    udp: true")
+		parts = append(parts, "udp: true")
 	}
+
 	if isTrue(opts["ws"]) {
-		lines = append(lines, "    network: ws", "    ws-opts:")
-		lines = append(lines, fmt.Sprintf("      path: %s", yamlString(firstOrDefault(opts["ws-path"], "/"))))
+		parts = append(parts, "network: ws")
+		path := firstOrDefault(opts["ws-path"], "/")
+		
+		wsOptsStr := fmt.Sprintf("path: %s", path)
 		if header := opts["ws-headers"]; header != "" {
-			parts := strings.SplitN(header, ":", 2)
-			if len(parts) == 2 {
-				lines = append(lines, "      headers:", fmt.Sprintf("        %s: %s", parts[0], yamlString(strings.TrimSpace(parts[1]))))
+			hParts := strings.SplitN(header, ":", 2)
+			if len(hParts) == 2 {
+				wsOptsStr += fmt.Sprintf(", headers: { %s: %s }", hParts[0], strings.TrimSpace(hParts[1]))
 			}
 		}
+		parts = append(parts, fmt.Sprintf("ws-opts: { %s }", wsOptsStr))
 	} else if svcName := opts["grpc-service-name"]; svcName != "" {
-		lines = append(lines, "    network: grpc", "    grpc-opts:")
-		lines = append(lines, fmt.Sprintf("      grpc-service-name: %s", yamlString(svcName)))
+		parts = append(parts, "network: grpc")
+		parts = append(parts, fmt.Sprintf("grpc-opts: { grpc-service-name: %s }", svcName))
 	}
-	return lines
+
+	return []string{fmt.Sprintf("  - { %s }", strings.Join(parts, ", "))}
 }
 
 func renderQuantumultXNode(node proxyNode) string {
