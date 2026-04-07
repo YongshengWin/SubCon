@@ -157,6 +157,7 @@ URL2;URL3；URL4"></textarea>
           <option value="surge" selected>Surge</option>
           <option value="clash">Clash</option>
           <option value="stash">Stash</option>
+          <option value="shadowrocket">Shadowrocket</option>
           <option value="quantumultx">Quantumult X</option>
         </select>
       </div>
