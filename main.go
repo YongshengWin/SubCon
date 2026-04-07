@@ -29,7 +29,7 @@ const (
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v0.6.6"
+	version               = "v0.7.0"
 )
 
 type config struct {
@@ -774,10 +774,29 @@ func renderClashLike(nodes []proxyNode, opts requestOptions) string {
 
 	var sb strings.Builder
 	
-	// 输出极简的 Clash/Meta 通用 Header，不使用几千行的累赘配置
-	sb.WriteString("port: 7890\nsocks-port: 7891\nallow-lan: false\nmode: rule\nlog-level: info\n")
+	// 基础设置：DNS 补全以应对分流需求
+	sb.WriteString("port: 7890\nsocks-port: 7891\nallow-lan: false\nmode: rule\nlog-level: info\nipv6: false\n\n")
+	sb.WriteString("dns:\n  enable: true\n  listen: 0.0.0.0:53\n  enhanced-mode: fake-ip\n  nameserver:\n    - 223.5.5.5\n    - 119.29.29.29\n\n")
 
-	// proxies 块：使用优雅的单行 JSON-like 格式输出，杜绝缩进及跨行错误
+	// 外部规则集：Rule Providers 实现业务分流（无代码负担）
+	sb.WriteString("rule-providers:\n")
+	providers := []struct{ Name, Type, Behavior, URL string }{
+		{"google", "http", "domain", "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/google.txt"},
+		{"youtube", "http", "domain", "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/youtube.txt"},
+		{"netflix", "http", "domain", "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/netflix.txt"},
+		{"spotify", "http", "domain", "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/spotify.txt"},
+		{"telegram", "http", "domain", "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/telegram.txt"},
+		{"chatgpt", "http", "domain", "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/openai.txt"},
+		{"claude", "http", "domain", "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Claude/Claude.yaml"},
+		{"one-one-five", "http", "domain", "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/115/115.yaml"},
+		{"bilibili", "http", "domain", "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/bilibili.txt"},
+		{"microsoft", "http", "domain", "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/microsoft.txt"},
+	}
+	for _, p := range providers {
+		sb.WriteString(fmt.Sprintf("  %s:\n    type: %s\n    behavior: %s\n    url: \"%s\"\n    path: ./ruleset/%s.yaml\n    interval: 86400\n", p.Name, p.Type, p.Behavior, p.URL, p.Name))
+	}
+
+	// 节点列表 (Flow Style)
 	sb.WriteString("\nproxies:\n")
 	for _, node := range nodes {
 		for _, line := range renderClashProxy(node) {
@@ -786,27 +805,54 @@ func renderClashLike(nodes []proxyNode, opts requestOptions) string {
 		}
 	}
 
-	// proxy-groups 块：简约但实用的分组体系，避免冗长的列表
+	// 策略组
 	sb.WriteString("\nproxy-groups:\n")
-	mainProxies := yamlString("自动选择")
+	
+	// 基础池
+	pool := yamlString("自动选择")
 	if opts.IncludeDirect {
-		mainProxies += ", " + yamlString("DIRECT")
+		pool += ", " + yamlString("DIRECT")
 	}
 	if len(nodeYAML) > 0 {
-		mainProxies += ", " + allNodes
+		pool += ", " + allNodes
 	}
-	
-	sb.WriteString(fmt.Sprintf("  - { name: '节点选择', type: select, proxies: [%s] }\n", mainProxies))
+
+	sb.WriteString(fmt.Sprintf("  - { name: '节点选择', type: select, proxies: [%s] }\n", pool))
 	if len(nodeYAML) > 0 {
 		sb.WriteString(fmt.Sprintf("  - { name: '自动选择', type: url-test, proxies: [%s], url: 'http://www.gstatic.com/generate_204', interval: 300 }\n", allNodes))
 	} else {
 		sb.WriteString("  - { name: '自动选择', type: select, proxies: ['DIRECT'] }\n")
 	}
 
-	// rules 块：仅包含必需的核心路由规则，其它未匹配直接走代理节点
+	// 专业分流组
+	// 国外业务：节点选择优先
+	intlGroups := []string{"Google", "YouTube", "ChatGPT", "Claude", "Netflix", "Spotify", "Telegram"}
+	for _, g := range intlGroups {
+		sb.WriteString(fmt.Sprintf("  - { name: '%s', type: select, proxies: [节点选择, 自动选择, DIRECT, %s] }\n", g, allNodes))
+	}
+
+	// 国内/大厂业务：DIRECT 优先
+	directFirstGroups := []string{"微软服务", "哔哩哔哩", "115"}
+	for _, g := range directFirstGroups {
+		sb.WriteString(fmt.Sprintf("  - { name: '%s', type: select, proxies: [DIRECT, 节点选择, 自动选择, %s] }\n", g, allNodes))
+	}
+
+	// 路由规则
 	sb.WriteString("\nrules:\n")
 	sb.WriteString("  - GEOIP,LAN,DIRECT,no-resolve\n")
 	sb.WriteString("  - DOMAIN-SUFFIX,local,DIRECT\n")
+	
+	sb.WriteString("  - RULE-SET,google,Google\n")
+	sb.WriteString("  - RULE-SET,youtube,YouTube\n")
+	sb.WriteString("  - RULE-SET,chatgpt,ChatGPT\n")
+	sb.WriteString("  - RULE-SET,claude,Claude\n")
+	sb.WriteString("  - RULE-SET,netflix,Netflix\n")
+	sb.WriteString("  - RULE-SET,spotify,Spotify\n")
+	sb.WriteString("  - RULE-SET,telegram,Telegram\n")
+	sb.WriteString("  - RULE-SET,bilibili,哔哩哔哩\n")
+	sb.WriteString("  - RULE-SET,microsoft,微软服务\n")
+	sb.WriteString("  - RULE-SET,one-one-five,115\n")
+	
 	sb.WriteString("  - MATCH,节点选择\n")
 
 	return sb.String()
