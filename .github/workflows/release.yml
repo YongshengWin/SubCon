@@ -40,9 +40,22 @@ jobs:
             dist/surge-sub-converter-linux-amd64.tar.gz
             dist/surge-sub-converter-linux-arm64.tar.gz
           body: |
-            ### v0.6.8 - Clash 重构与格式优化
-            - 基于 Flow Style 重构 Clash 配置生成，彻底规避 YAML 解析换行导致参数丢失的问题。
-            - 补全 `ws-headers: Host` 缺失配置，确保 CDN 类节点正常连接。
-            - 移除内置 4000+ 行静态规则模板，改用极简动态生成策略，提升效率与维护性。
+            ## 🎉 v1.0.0 正式版发布
+
+            经过多轮迭代与逻辑重构，核心功能已趋于稳定，现正式发布 v1.0.0 版本。
+
+            ### 🚀 核心功能
+            - **全平台支持**：新增对 **Shadowrocket（小火箭）** 纯节点列表订阅的支持。
+            - **极简分流体系**：引入 **Remote Rule Providers**，内置 ChatGPT、Google、YouTube、Netflix、Bilibili 等专业分流组，支持国内外流量自动分流。
+            - **高兼容性输出**：Clash/Stash 采用 Flow Style (Inline JSON-like) 输出，彻底解决 YAML 解析时的缩进与换行冲突。
+            - **高性能后端**：Go 语言编写，内置内存缓存机制，秒级响应订阅转换请求。
+            - **一键部署**：完善的 `sub` 命令行工具，支持 HTTPS 证书复用、订阅管理与自动更新。
+
+            ### 🛠 修复与优化
+            - 修复了 Clash 策略组中的中文引号解析问题。
+            - 补全了 `ws-headers: Host` 等关键参数。
+            - 移除了臃肿的 4000+ 行内置规则，极大提升加载速度。
+
+            感谢使用！
           draft: false
           prerelease: false

@@ -12,10 +12,10 @@
 
 ## 当前支持
 
-- 节点协议：`vmess` `vless` `trojan` `ss`
-- 目标客户端：`surge` `clash` `stash` `quantumultx`
+- **节点协议**：`VMess` `VLESS` `Trojan` `Shadowsocks (SS/SSD)`
+- **目标客户端**：`Surge` `Clash` `Stash` `Shadowrocket` `Quantumult X`
 
-不支持的协议会被忽略，不会导致整个请求失败。
+内置多种专业分流规则集（ChatGPT, Google, YouTube, Bilibili 等），实现国内外流量一键分流。
 
 ## 页面与接口
 

@@ -103,7 +103,7 @@ detect_version() {
     return 0
   fi
   # 否则默认脚本内的硬编码版本
-  VERSION="v0.8.2"
+  VERSION="v1.0.0"
   echo "${VERSION}"
 }
 
