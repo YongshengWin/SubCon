@@ -97,7 +97,7 @@ detect_public_ip() {
 }
 
 detect_version() {
-  VERSION="v0.6.5"
+  VERSION="v0.6.8"
   echo "${VERSION}"
 }
 

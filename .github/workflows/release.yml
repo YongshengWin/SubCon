@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build
+        run: |
+          mkdir -p dist
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o dist/surge-sub-converter .
+          cd dist
+          tar -czf surge-sub-converter-linux-amd64.tar.gz surge-sub-converter
+          rm surge-sub-converter
+          cd ..
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o dist/surge-sub-converter .
+          cd dist
+          tar -czf surge-sub-converter-linux-arm64.tar.gz surge-sub-converter
+          rm surge-sub-converter
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            dist/surge-sub-converter-linux-amd64.tar.gz
+            dist/surge-sub-converter-linux-arm64.tar.gz
+          body: |
+            ### v0.6.8 - Clash 重构与格式优化
+            - 基于 Flow Style 重构 Clash 配置生成，彻底规避 YAML 解析换行导致参数丢失的问题。
+            - 补全 `ws-headers: Host` 缺失配置，确保 CDN 类节点正常连接。
+            - 移除内置 4000+ 行静态规则模板，改用极简动态生成策略，提升效率与维护性。
+          draft: false
+          prerelease: false
