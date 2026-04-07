@@ -29,7 +29,7 @@ const (
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v0.7.2"
+	version               = "v0.8.0"
 )
 
 type config struct {
@@ -697,6 +697,8 @@ func renderByTarget(nodes []proxyNode, opts requestOptions) (string, error) {
 		return renderSurge(nodes, opts), nil
 	case "clash", "stash":
 		return renderClashLike(nodes, opts), nil
+	case "shadowrocket":
+		return renderShadowrocket(nodes, opts), nil
 	case "quantumultx", "quantumult-x", "quanx", "quantumult":
 		return renderQuantumultX(nodes, opts), nil
 	default:
@@ -709,6 +711,8 @@ func targetContentMeta(target string) (contentType, ext string) {
 	switch target {
 	case "clash", "stash":
 		return "text/yaml; charset=utf-8", "yaml"
+	case "shadowrocket":
+		return "text/plain; charset=utf-8", "txt"
 	case "quantumultx", "quantumult-x", "quanx", "quantumult":
 		return "text/plain; charset=utf-8", "conf"
 	default:
@@ -1390,4 +1394,78 @@ func generateRandomToken(length int) string {
 		b[i] = charset[int(b[i])%len(charset)]
 	}
 	return string(b)
+}
+
+func renderShadowrocket(nodes []proxyNode, opts requestOptions) string {
+	links := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		link := ""
+		params := make(map[string]string)
+		for _, opt := range n.Options {
+			if parts := strings.SplitN(opt, "=", 2); len(parts) == 2 {
+				params[parts[0]] = parts[1]
+			}
+		}
+
+		switch n.SurgeType {
+		case "ss":
+			method := params["encrypt-method"]
+			pass := params["password"]
+			auth := base64.StdEncoding.EncodeToString([]byte(method + ":" + pass))
+			link = fmt.Sprintf("ss://%s@%s:%d#%s", auth, n.Host, n.Port, url.QueryEscape(n.Name))
+		case "vmess":
+			vconfig := map[string]any{
+				"v":    "2",
+				"ps":   n.Name,
+				"add":  n.Host,
+				"port": n.Port,
+				"id":   params["password"],
+				"aid":  params["alterId"],
+				"net":  "tcp",
+				"type": "none",
+				"tls":  "",
+			}
+			if params["ws"] == "true" {
+				vconfig["net"] = "ws"
+				vconfig["path"] = params["ws-path"]
+				if h := params["ws-headers"]; strings.HasPrefix(h, "Host:") {
+					vconfig["host"] = strings.TrimPrefix(h, "Host:")
+				}
+			}
+			if params["tls"] == "true" {
+				vconfig["tls"] = "tls"
+				if sni := params["sni"]; sni != "" {
+					vconfig["sni"] = sni
+				}
+			}
+			data, _ := json.Marshal(vconfig)
+			link = "vmess://" + base64.StdEncoding.EncodeToString(data)
+		case "trojan":
+			pass := params["password"]
+			link = fmt.Sprintf("trojan://%s@%s:%d?peer=%s#%s", pass, n.Host, n.Port, url.QueryEscape(params["sni"]), url.QueryEscape(n.Name))
+		case "vless":
+			pass := params["password"]
+			query := url.Values{}
+			if params["ws"] == "true" {
+				query.Set("type", "ws")
+				query.Set("path", params["ws-path"])
+				if h := params["ws-headers"]; strings.HasPrefix(h, "Host:") {
+					query.Set("host", strings.TrimPrefix(h, "Host:"))
+				}
+			}
+			if params["tls"] == "true" {
+				query.Set("security", "tls")
+				if sni := params["sni"]; sni != "" {
+					query.Set("sni", sni)
+				}
+			}
+			link = fmt.Sprintf("vless://%s@%s:%d?%s#%s", pass, n.Host, n.Port, query.Encode(), url.QueryEscape(n.Name))
+		}
+
+		if link != "" {
+			links = append(links, link)
+		}
+	}
+
+	return base64.StdEncoding.EncodeToString([]byte(strings.Join(links, "\n")))
 }
