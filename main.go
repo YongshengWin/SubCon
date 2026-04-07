@@ -1023,6 +1023,9 @@ func parseOptionPairs(items []string) map[string]string {
 }
 
 func yamlString(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "\r", "")
+	value = strings.ReplaceAll(value, "\n", "")
 	value = strings.ReplaceAll(value, `'`, `''`)
 	return "'" + value + "'"
 }
