@@ -29,7 +29,7 @@ const (
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v0.6.5"
+	version               = "v0.6.6"
 )
 
 type config struct {
@@ -192,8 +192,9 @@ func handleConvert(cfg config, apiMode bool) http.HandlerFunc {
 			return
 		}
 
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s.txt"`, opts.Target))
+		contentType, fileExt := targetContentMeta(opts.Target)
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s.%s"`, opts.Target, fileExt))
 		if cfg.CacheTTL > 0 {
 			w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(cfg.CacheTTL.Seconds())))
 		}
@@ -699,6 +700,18 @@ func renderByTarget(nodes []proxyNode, opts requestOptions) (string, error) {
 	}
 }
 
+// targetContentMeta 根据目标平台返回合适的 Content-Type 和文件扩展名
+func targetContentMeta(target string) (contentType, ext string) {
+	switch target {
+	case "clash", "stash":
+		return "text/yaml; charset=utf-8", "yaml"
+	case "quantumultx", "quantumult-x", "quanx", "quantumult":
+		return "text/plain; charset=utf-8", "conf"
+	default:
+		return "text/plain; charset=utf-8", "txt"
+	}
+}
+
 func withUniqueNames(nodes []proxyNode) []proxyNode {
 	usedNames := map[string]int{}
 	for i := range nodes {
@@ -771,7 +784,7 @@ func renderClashLike(nodes []proxyNode, opts requestOptions) string {
 		"",
 		"proxy-groups:",
 		fmt.Sprintf("  - { name: %s, type: select, proxies: [%s] }", yamlString(opts.PolicyName), strings.Join(groupMembers, ", ")),
-		fmt.Sprintf("  - { name: %s, type: url-test, url: %s, interval: 600, proxies: [%s] }", yamlString("Auto"), yamlString(opts.TestURL), strings.Join(groupMembers, ", ")),
+		fmt.Sprintf("  - { name: %s, type: url-test, url: %s, interval: 600, tolerance: 150, proxies: [%s] }", yamlString("Auto"), yamlString(opts.TestURL), strings.Join(groupMembers, ", ")),
 		"",
 		"rules:",
 		fmt.Sprintf("  - MATCH,%s", opts.PolicyName),
@@ -820,8 +833,17 @@ func renderClashProxy(node proxyNode) []string {
 		fmt.Sprintf("    port: %d", node.Port),
 	}
 	switch node.SurgeType {
-	case "vmess", "vless":
+	case "vmess":
+		lines = append(lines,
+			fmt.Sprintf("    uuid: %s", yamlString(opts["username"])),
+			"    alterId: 0",
+			"    cipher: auto",
+		)
+	case "vless":
 		lines = append(lines, fmt.Sprintf("    uuid: %s", yamlString(opts["username"])))
+		if flow := opts["flow"]; flow != "" {
+			lines = append(lines, fmt.Sprintf("    flow: %s", yamlString(flow)))
+		}
 	case "trojan":
 		lines = append(lines, fmt.Sprintf("    password: %s", yamlString(opts["password"])))
 	case "ss":
@@ -848,9 +870,12 @@ func renderClashProxy(node proxyNode) []string {
 		if header := opts["ws-headers"]; header != "" {
 			parts := strings.SplitN(header, ":", 2)
 			if len(parts) == 2 {
-				lines = append(lines, "      headers:", fmt.Sprintf("        %s: %s", parts[0], yamlString(parts[1])))
+				lines = append(lines, "      headers:", fmt.Sprintf("        %s: %s", parts[0], yamlString(strings.TrimSpace(parts[1]))))
 			}
 		}
+	} else if svcName := opts["grpc-service-name"]; svcName != "" {
+		lines = append(lines, "    network: grpc", "    grpc-opts:")
+		lines = append(lines, fmt.Sprintf("      grpc-service-name: %s", yamlString(svcName)))
 	}
 	return lines
 }
