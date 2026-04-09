@@ -23,8 +23,8 @@
 
 - `/` 前端页面
 - `/healthz` 健康检查
-- `/convert` 返回目标客户端对应的纯文本配置
 - `/api/convert` 返回 JSON，供前端预览调用
+- `/s/<token>` 返回目标客户端对应的纯文本配置短链
 
 ## 发布版安装
 
@@ -163,7 +163,7 @@ sub
 配置完成后，访问地址变为：
 
 ```text
-https://sub.example.com:8443/convert?target=surge&url=...
+https://sub.example.com:8443/s/<token>
 ```
 
 Cloudflare 橙云代理支持的 HTTPS 端口：`443, 2053, 2083, 2087, 2096, 8443`。
@@ -186,13 +186,7 @@ acme.sh --install-cert -d 你的域名 --reloadcmd "systemctl restart surge-sub-
 http://your-server:2096/sub/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
-那么转换地址就是：
-
-```text
-http://your-converter-server:8090/convert?target=surge&url=http%3A%2F%2Fyour-server%3A2096%2Fsub%2Fxxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-```
-
-也可以直接打开前端页面：
+建议直接打开前端页面：
 
 ```text
 http://your-converter-server:8090/
@@ -201,8 +195,10 @@ http://your-converter-server:8090/
 在页面里粘贴原始订阅 URL，然后：
 
 - 预览生成的配置
-- 复制长期可用的转换链接
-- 直接在新窗口打开配置
+- 生成长期可用的短链
+- 复制或直接打开短链结果
+
+出于安全考虑，公开入口不再推荐也不再展示带原始订阅 URL 的明文转换链接。
 
 ## 可选参数
 

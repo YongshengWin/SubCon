@@ -338,14 +338,8 @@ list_links() {
     fi
 
     [[ -z "${name}" ]] && continue
-    local encoded
-    encoded="$(rawurlencode "${source}")"
-    
-    # 修复 printf 的样式定义，变量作为参数传递，防止 URL 中的 % 报错
     printf "  ${BOLD}${CYAN}%d.${NC} %s\n" "$i" "${name}"
     printf "     ${DIM}目标:${NC} %s\n" "${target}"
-    printf "     ${DIM}来源:${NC} %s\n" "${source}"
-    printf "     ${DIM}链接:${NC} ${DIM}%s/convert?target=%s&url=%s${NC}\n" "${base}" "${target}" "${encoded}"
     printf "     ${DIM}短链:${NC} ${GREEN}%s/s/%s${NC}\n" "${base}" "${token}"
     echo
     i=$((i+1))

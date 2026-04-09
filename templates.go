@@ -204,13 +204,6 @@ URL2;URL3；URL4"></textarea>
       copyConfigBtn: document.getElementById('copy-config-btn')
     };
 
-    function buildConvertURL(apiMode) {
-      const url = new URL(apiMode ? '/api/convert' : '/convert', window.location.origin);
-      url.searchParams.set('url', el.subURL.value.trim());
-      url.searchParams.set('target', el.target.value || '{{.DefaultTarget}}');
-      return url.toString();
-    }
-
     function setStatus(message, type) {
       el.status.textContent = message || '';
       el.status.className = 'status' + (type ? ' ' + type : '');
@@ -237,13 +230,18 @@ URL2;URL3；URL4"></textarea>
         setStatus('先填原始订阅 URL。', 'error');
         return;
       }
-      const apiURL = buildConvertURL(true);
-      const directURL = buildConvertURL(false);
-      el.convertLink.value = directURL;
+      el.convertLink.value = '';
       setStatus('正在转换...', '');
       el.output.textContent = '处理中...';
       try {
-        const resp = await fetch(apiURL);
+        const resp = await fetch('/api/convert', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: source,
+            target: el.target.value || '{{.DefaultTarget}}'
+          })
+        });
         const data = await resp.json();
         if (!resp.ok || !data.success) throw new Error(data.error || '转换失败');
         renderPills(data);
@@ -261,11 +259,11 @@ URL2;URL3；URL4"></textarea>
           if (shortData.success && shortData.shortUrl) {
             el.convertLink.value = window.location.origin + shortData.shortUrl;
           } else {
-            setStatus('[API ERROR] ' + (shortData.error || '短链生成失败'), 'error');
+            setStatus('转换完成，但短链生成失败。', 'error');
           }
         } catch (e) {
           console.error('Failed to get short URL', e);
-          setStatus('[FETCH ERROR] 无法连接后台短链 API', 'error');
+          setStatus('转换完成，但短链接口不可用。', 'error');
         }
       } catch (err) {
         renderPills({ nodeCount: 0, ignoredTypes: [] });
@@ -289,7 +287,11 @@ URL2;URL3；URL4"></textarea>
 
     el.previewBtn.addEventListener('click', preview);
     el.copyLinkBtn.addEventListener('click', () => {
-      const val = el.convertLink.value || buildConvertURL(false);
+      const val = el.convertLink.value;
+      if (!val) {
+        setStatus('请先生成短链。', 'error');
+        return;
+      }
       copyText(val, '转换链接已复制。');
     });
     el.copyShortBtn.addEventListener('click', () => {
@@ -307,9 +309,9 @@ URL2;URL3；URL4"></textarea>
       copyText(el.output.textContent, '配置内容已复制。');
     });
     el.openLinkBtn.addEventListener('click', () => {
-      const val = el.convertLink.value || buildConvertURL(false);
-      if (!val || val.includes('点击生成后出现')) {
-        setStatus('先填原始订阅 URL。', 'error');
+      const val = el.convertLink.value;
+      if (!val) {
+        setStatus('请先生成短链。', 'error');
         return;
       }
       window.open(val, '_blank', 'noopener,noreferrer');

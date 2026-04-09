@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -57,6 +58,17 @@ type proxyNode struct {
 type pageData struct {
 	DefaultTarget string
 	Version       string
+}
+
+type convertRequest struct {
+	URL            string `json:"url"`
+	Target         string `json:"target"`
+	Policy         string `json:"policy"`
+	TestURL        string `json:"test_url"`
+	UDP            *bool  `json:"udp"`
+	SkipCertVerify *bool  `json:"skip_cert_verify"`
+	Direct         *bool  `json:"direct"`
+	List           *bool  `json:"list"`
 }
 
 type vmessPayload struct {
@@ -161,18 +173,25 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 
 func handleConvert(cfg config, apiMode bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
+		if r.Method != http.MethodGet && !(apiMode && r.Method == http.MethodPost) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-
-		subURL := strings.TrimSpace(r.URL.Query().Get("url"))
-		if subURL == "" {
-			writeError(w, apiMode, http.StatusBadRequest, "missing url query parameter")
+		if !apiMode && r.Method == http.MethodGet && strings.TrimSpace(r.URL.Query().Get("url")) != "" {
+			http.Error(w, "direct conversion links are disabled; use the web page or a short link", http.StatusForbidden)
 			return
 		}
 
-		opts := parseRequestOptions(r, cfg)
+		subURL, opts, err := parseConvertRequest(r, cfg, apiMode)
+		if err != nil {
+			writeError(w, apiMode, http.StatusBadRequest, err.Error())
+			return
+		}
+		if subURL == "" {
+			writeError(w, apiMode, http.StatusBadRequest, "missing url")
+			return
+		}
+
 		result, ignored, count, err := convertSubscription(r.Context(), cfg, subURL, opts)
 		if err != nil {
 			writeError(w, apiMode, http.StatusBadRequest, err.Error())
@@ -185,7 +204,6 @@ func handleConvert(cfg config, apiMode bool) http.HandlerFunc {
 				"nodeCount":      count,
 				"ignoredTypes":   ignored,
 				"config":         result,
-				"subscription":   subURL,
 				"target":         opts.Target,
 				"policy":         opts.PolicyName,
 				"skipCertVerify": opts.SkipCertVerify,
@@ -205,6 +223,17 @@ func handleConvert(cfg config, apiMode bool) http.HandlerFunc {
 		}
 		_, _ = w.Write([]byte(result))
 	}
+}
+
+func parseConvertRequest(r *http.Request, cfg config, apiMode bool) (string, requestOptions, error) {
+	if apiMode && r.Method == http.MethodPost {
+		var req convertRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			return "", requestOptions{}, errors.New("invalid request body")
+		}
+		return strings.TrimSpace(req.URL), parseRequestOptionsFromBody(req, cfg), nil
+	}
+	return strings.TrimSpace(r.URL.Query().Get("url")), parseRequestOptions(r, cfg), nil
 }
 
 type requestOptions struct {
@@ -234,6 +263,24 @@ func parseRequestOptions(r *http.Request, cfg config) requestOptions {
 	}
 }
 
+func parseRequestOptionsFromBody(req convertRequest, cfg config) requestOptions {
+	target := strings.ToLower(firstOrDefault(req.Target, defaultTarget))
+	policy := sanitizeName(firstOrDefault(req.Policy, defaultProxyGroupName))
+	if policy == "" {
+		policy = defaultProxyGroupName
+	}
+
+	return requestOptions{
+		Target:         target,
+		PolicyName:     policy,
+		TestURL:        firstOrDefault(req.TestURL, cfg.TestURL),
+		AllowUDP:       boolOrDefault(req.UDP, true),
+		SkipCertVerify: boolOrDefault(req.SkipCertVerify, true),
+		IncludeDirect:  boolOrDefault(req.Direct, true),
+		ProxyListOnly:  boolOrDefault(req.List, false),
+	}
+}
+
 func convertSubscription(ctx context.Context, cfg config, subURL string, opts requestOptions) (string, []string, int, error) {
 	cacheKey := buildCacheKey(subURL, opts)
 	if entry, ok := resultCache.Get(cacheKey); ok {
@@ -252,7 +299,7 @@ func convertSubscription(ctx context.Context, cfg config, subURL string, opts re
 			defer wg.Done()
 			text, err := fetchSubscription(cfg, targetURL)
 			if err != nil {
-				log.Printf("[WARN] Failed to fetch %s: %v", targetURL, err)
+				log.Printf("[WARN] Failed to fetch %s: %v", redactURL(targetURL), err)
 				return
 			}
 			
@@ -354,6 +401,10 @@ func deduplicateNodes(nodes []proxyNode) []proxyNode {
 }
 
 func fetchSubscription(cfg config, subURL string) (string, error) {
+	if err := validateSubscriptionURL(subURL); err != nil {
+		return "", err
+	}
+
 	req, err := http.NewRequest(http.MethodGet, subURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("invalid subscription url: %w", err)
@@ -375,6 +426,44 @@ func fetchSubscription(cfg config, subURL string) (string, error) {
 		return "", fmt.Errorf("failed to read subscription: %w", err)
 	}
 	return decodeSubscriptionBody(body), nil
+}
+
+func validateSubscriptionURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid subscription url: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.New("subscription url must use http or https")
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return errors.New("subscription url missing host")
+	}
+	if isBlockedHost(host) {
+		return errors.New("subscription host is not allowed")
+	}
+
+	ips, err := net.DefaultResolver.LookupIPAddr(context.Background(), host)
+	if err != nil {
+		return fmt.Errorf("failed to resolve subscription host: %w", err)
+	}
+	for _, ip := range ips {
+		if isBlockedIP(ip.IP) {
+			return errors.New("subscription host resolves to a private or local address")
+		}
+	}
+	return nil
+}
+
+func isBlockedHost(host string) bool {
+	host = strings.TrimSpace(strings.ToLower(host))
+	return host == "localhost" || strings.HasSuffix(host, ".localhost")
+}
+
+func isBlockedIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalMulticast() || ip.IsLinkLocalUnicast() ||
+		ip.IsMulticast() || ip.IsUnspecified()
 }
 
 func decodeSubscriptionBody(body []byte) string {
@@ -1067,6 +1156,13 @@ func parseBoolDefault(raw string, fallback bool) bool {
 	}
 }
 
+func boolOrDefault(value *bool, fallback bool) bool {
+	if value == nil {
+		return fallback
+	}
+	return *value
+}
+
 func writeError(w http.ResponseWriter, apiMode bool, status int, message string) {
 	if apiMode {
 		writeJSON(w, status, map[string]any{
@@ -1120,6 +1216,17 @@ func getenv(key string, fallback string) string {
 	return fallback
 }
 
+func redactURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "[redacted]"
+	}
+	if parsed.Host == "" {
+		return "[redacted]"
+	}
+	return parsed.Scheme + "://" + parsed.Host + "/..."
+}
+
 func (c *converterCache) Get(key string) (cacheEntry, bool) {
 	c.mu.RLock()
 	entry, ok := c.items[key]
@@ -1143,7 +1250,6 @@ func (c *converterCache) Set(key string, entry cacheEntry) {
 }
 
 func handleShortLink(cfg config) http.HandlerFunc {
-	converterFunc := handleConvert(cfg, false)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1210,19 +1316,29 @@ func handleShortLink(cfg config) http.HandlerFunc {
 			strings.Contains(ua, "loon") ||
 			strings.Contains(ua, "sing-box")
 
+		opts := parseRequestOptions(r, cfg)
+		opts.Target = target
 		if isProxyClient {
-			// 如果是代理客户端(Surge等)访问，自动追加 list=true 以触发纯代理行输出
-			q := r.URL.Query()
-			q.Set("list", "true")
-			r.URL.RawQuery = q.Encode()
+			opts.ProxyListOnly = true
 		}
 
-		// 走正常转换流程
-		q := r.URL.Query()
-		q.Set("target", target)
-		q.Set("url", urlStr)
-		r.URL.RawQuery = q.Encode()
-		converterFunc(w, r)
+		result, ignored, count, err := convertSubscription(r.Context(), cfg, urlStr, opts)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		contentType, fileExt := targetContentMeta(opts.Target)
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s.%s"`, opts.Target, fileExt))
+		if cfg.CacheTTL > 0 {
+			w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(cfg.CacheTTL.Seconds())))
+		}
+		w.Header().Set("X-Node-Count", strconv.Itoa(count))
+		if len(ignored) > 0 {
+			w.Header().Set("X-Ignored-Types", strings.Join(ignored, ","))
+		}
+		_, _ = w.Write([]byte(result))
 	}
 }
 

@@ -53,4 +53,4 @@ echo
 echo "安装完成"
 echo "前端页面: http://你的服务器IP:${APP_PORT}/"
 echo "健康检查: http://你的服务器IP:${APP_PORT}/healthz"
-echo "转换接口: http://你的服务器IP:${APP_PORT}/convert?url=http%3A%2F%2F你的3x-ui域名或IP%3A订阅端口%2Fsub%2F你的subid"
+echo "使用方式: 打开前端页面生成短链后再使用，公开入口不再展示明文转换链接"
