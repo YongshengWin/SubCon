@@ -26,12 +26,15 @@ const (
 	defaultListen         = "0.0.0.0"
 	defaultPort           = "8090"
 	defaultTestURL        = "http://www.gstatic.com/generate_204"
-	defaultUserAgent      = "surge-sub-converter/v1.1.1"
 	defaultFetchTimeout   = 15 * time.Second
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v1.1.1"
+)
+
+var (
+	version   = "dev"
+	userAgent = ""
 )
 
 type config struct {
@@ -128,7 +131,7 @@ func loadConfig() config {
 		Listen:       getenv("SSC_LISTEN", defaultListen),
 		Port:         getenv("SSC_PORT", defaultPort),
 		TestURL:      getenv("SSC_TEST_URL", defaultTestURL),
-		UserAgent:    getenv("SSC_USER_AGENT", defaultUserAgent),
+		UserAgent:    getenv("SSC_USER_AGENT", defaultUserAgentValue()),
 		FetchTimeout: defaultFetchTimeout,
 		CacheTTL:     defaultCacheTTL,
 		CertFile:     getenv("SSC_CERT_FILE", ""),
@@ -149,6 +152,20 @@ func loadConfig() config {
 	return cfg
 }
 
+func defaultUserAgentValue() string {
+	if strings.TrimSpace(userAgent) != "" {
+		return userAgent
+	}
+	return "surge-sub-converter/" + currentVersion()
+}
+
+func currentVersion() string {
+	if strings.TrimSpace(version) == "" {
+		return "dev"
+	}
+	return version
+}
+
 func handleIndex(cfg config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -159,7 +176,7 @@ func handleIndex(cfg config) http.HandlerFunc {
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		if err := indexTemplate.Execute(w, pageData{
 			DefaultTarget: defaultTarget,
-			Version:       version,
+			Version:       currentVersion(),
 		}); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}

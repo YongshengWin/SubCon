@@ -7,6 +7,18 @@ BIN_PATH="/usr/local/bin/${APP_NAME}"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 APP_PORT="${APP_PORT:-8090}"
 
+detect_version() {
+  if [[ -n "${VERSION:-}" ]]; then
+    printf '%s\n' "${VERSION}"
+    return 0
+  fi
+  if git -C "${SCRIPT_DIR}" describe --tags --exact-match >/dev/null 2>&1; then
+    git -C "${SCRIPT_DIR}" describe --tags --exact-match
+    return 0
+  fi
+  git -C "${SCRIPT_DIR}" describe --tags --always --dirty 2>/dev/null || echo "dev"
+}
+
 if [[ "${EUID}" -ne 0 ]]; then
   echo "请使用 root 运行安装脚本"
   exit 1
@@ -18,14 +30,16 @@ if ! command -v go >/dev/null 2>&1; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERSION="$(detect_version)"
 mkdir -p "${INSTALL_DIR}"
 
 cp "${SCRIPT_DIR}/go.mod" "${INSTALL_DIR}/go.mod"
 cp "${SCRIPT_DIR}/main.go" "${INSTALL_DIR}/main.go"
 cp "${SCRIPT_DIR}/templates.go" "${INSTALL_DIR}/templates.go"
+cp "${SCRIPT_DIR}/clash_template.go" "${INSTALL_DIR}/clash_template.go"
 
 cd "${INSTALL_DIR}"
-go build -trimpath -ldflags="-s -w" -o "${BIN_PATH}" .
+go build -trimpath -ldflags="-s -w -X main.version=${VERSION} -X main.userAgent=surge-sub-converter/${VERSION}" -o "${BIN_PATH}" .
 
 cat > "${SERVICE_FILE}" <<EOF
 [Unit]

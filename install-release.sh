@@ -97,14 +97,27 @@ detect_public_ip() {
 }
 
 detect_version() {
-  # 如果环境变量已设置（如通过 sub 1 传递），则直接使用
   if [[ -n "${VERSION:-}" ]]; then
     echo "${VERSION}"
     return 0
   fi
-  # 否则默认脚本内的硬编码版本
-  VERSION="v1.0.0"
-  echo "${VERSION}"
+
+  local latest
+  latest="$(fetch_text "${API_URL}" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+  if [[ -z "${latest}" ]]; then
+    echo "无法从 GitHub Release API 获取最新版本" >&2
+    exit 1
+  fi
+  echo "${latest}"
+}
+
+verify_binary_version() {
+  local binary="$1"
+  local version="$2"
+  if ! grep -aFq "${version}" "${binary}"; then
+    echo "下载的二进制版本校验失败，期望 ${version}" >&2
+    exit 1
+  fi
 }
 
 install_binary() {
@@ -116,6 +129,7 @@ install_binary() {
   echo "下载 ${download_url}"
   fetch "${download_url}" "${TMP_DIR}/${pkg_name}"
   tar -xzf "${TMP_DIR}/${pkg_name}" -C "${TMP_DIR}"
+  verify_binary_version "${TMP_DIR}/${APP_NAME}" "${version}"
 
   mkdir -p "${INSTALL_DIR}" "${CONFIG_DIR}"
   install -m 0755 "${TMP_DIR}/${APP_NAME}" "${BIN_PATH}"

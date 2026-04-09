@@ -66,9 +66,16 @@ sudo APP_PORT=8090 ./install.sh
 如果你要自己发布，请先本地打包：
 
 ```bash
-cd tools/surge_sub_converter
+git tag vX.Y.Z
 chmod +x package-release.sh
 ./package-release.sh
+```
+
+`package-release.sh` 默认从当前提交所在的 Git tag 读取版本，并把同一个版本号注入后端、前端页面展示和默认 User-Agent。
+如果当前提交还没打 tag，也可以显式传入：
+
+```bash
+VERSION=vX.Y.Z ./package-release.sh
 ```
 
 然后把生成的这两个文件上传到你的发布地址：
@@ -87,7 +94,7 @@ https://github.com/YongshengWin/SubCon/releases/download/<tag>/
 如果你想手动指定版本，也可以覆盖：
 
 ```bash
-VERSION=v0.1.0 bash install-release.sh
+VERSION=vX.Y.Z bash install-release.sh
 ```
 
 如果你的下载地址或 API 地址不同，安装时可以覆盖：
@@ -223,7 +230,7 @@ http://your-converter-server:8090/
 - `SSC_PORT` 默认 `8090`
 - `SSC_TEST_URL` 默认 `http://www.gstatic.com/generate_204`
 - `SSC_FETCH_TIMEOUT` 默认 `15`，单位秒
-- `SSC_USER_AGENT` 默认 `surge-sub-converter/0.2`
+- `SSC_USER_AGENT` 默认 `surge-sub-converter/<当前版本>`
 
 ## 说明
 
