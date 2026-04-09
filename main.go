@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,12 +25,12 @@ const (
 	defaultListen         = "0.0.0.0"
 	defaultPort           = "8090"
 	defaultTestURL        = "http://www.gstatic.com/generate_204"
-	defaultUserAgent      = "surge-sub-converter/v1.0.0"
+	defaultUserAgent      = "surge-sub-converter/v1.1.0"
 	defaultFetchTimeout   = 15 * time.Second
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
-	version               = "v1.0.0"
+	version               = "v1.1.0"
 )
 
 type config struct {
@@ -770,96 +771,54 @@ func renderSurge(nodes []proxyNode, opts requestOptions) string {
 }
 
 func renderClashLike(nodes []proxyNode, opts requestOptions) string {
-	nodeYAML := make([]string, len(nodes))
-	for i, n := range nodes {
-		nodeYAML[i] = yamlString(n.Name)
-	}
-	allNodes := strings.Join(nodeYAML, ", ")
-
-	var sb strings.Builder
-	
-	// 基础设置：DNS 补全以应对分流需求
-	sb.WriteString("port: 7890\nsocks-port: 7891\nallow-lan: false\nmode: rule\nlog-level: info\nipv6: false\n\n")
-	sb.WriteString("dns:\n  enable: true\n  listen: 0.0.0.0:53\n  enhanced-mode: fake-ip\n  nameserver:\n    - 223.5.5.5\n    - 119.29.29.29\n\n")
-
-	// 外部规则集：Rule Providers 实现业务分流（无代码负担）
-	sb.WriteString("rule-providers:\n")
-	providers := []struct{ Name, Type, Behavior, URL string }{
-		{"google", "http", "domain", "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/google.txt"},
-		{"youtube", "http", "domain", "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/youtube.txt"},
-		{"netflix", "http", "domain", "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/netflix.txt"},
-		{"spotify", "http", "domain", "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/spotify.txt"},
-		{"telegram", "http", "domain", "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/telegram.txt"},
-		{"chatgpt", "http", "domain", "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/openai.txt"},
-		{"claude", "http", "domain", "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Claude/Claude.yaml"},
-		{"one-one-five", "http", "domain", "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/115/115.yaml"},
-		{"bilibili", "http", "domain", "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/bilibili.txt"},
-		{"microsoft", "http", "domain", "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/microsoft.txt"},
-	}
-	for _, p := range providers {
-		sb.WriteString(fmt.Sprintf("  %s:\n    type: %s\n    behavior: %s\n    url: \"%s\"\n    path: ./ruleset/%s.yaml\n    interval: 86400\n", p.Name, p.Type, p.Behavior, p.URL, p.Name))
-	}
-
-	// 节点列表 (Flow Style)
-	sb.WriteString("\nproxies:\n")
+	var proxiesBuilder strings.Builder
+	proxiesBuilder.WriteString("proxies:\n")
+	var nodeNames []string
 	for _, node := range nodes {
 		for _, line := range renderClashProxy(node) {
-			sb.WriteString(line)
-			sb.WriteByte('\n')
+			proxiesBuilder.WriteString(line)
+			proxiesBuilder.WriteByte('\n')
+		}
+		// 生成节点名称列表留作用于追加，此处包裹了 yaml 字符串逃逸
+		nodeNames = append(nodeNames, yamlString(node.Name))
+	}
+
+	// 1. 替换 proxies
+	res := strings.Replace(clashTemplateYAML, "proxies: []", proxiesBuilder.String(), 1)
+
+	// 2. 注入 proxy-groups 策略组
+	lines := strings.Split(res, "\n")
+	inProxyGroups := false
+	reProxies := regexp.MustCompile(`(proxies:\s*\[)(.*?)(\])`)
+
+	for i, line := range lines {
+		if strings.HasPrefix(line, "proxy-groups:") {
+			inProxyGroups = true
+		} else if strings.HasPrefix(line, "rules:") {
+			inProxyGroups = false
+		}
+
+		if inProxyGroups {
+			lines[i] = reProxies.ReplaceAllStringFunc(line, func(match string) string {
+				matches := reProxies.FindStringSubmatch(match)
+				prefix := matches[1]
+				list := strings.TrimSpace(matches[2])
+				suffix := matches[3]
+
+				if len(nodeNames) == 0 {
+					return match // 如果没有任何可用节点，直接保持原样
+				}
+
+				if list == "" {
+					return prefix + strings.Join(nodeNames, ", ") + suffix
+				}
+				// 以防已有元素
+				return prefix + list + ", " + strings.Join(nodeNames, ", ") + suffix
+			})
 		}
 	}
 
-	// 策略组
-	sb.WriteString("\nproxy-groups:\n")
-	
-	// 基础池
-	pool := yamlString("自动选择")
-	if opts.IncludeDirect {
-		pool += ", " + yamlString("DIRECT")
-	}
-	if len(nodeYAML) > 0 {
-		pool += ", " + allNodes
-	}
-
-	sb.WriteString(fmt.Sprintf("  - { name: '节点选择', type: select, proxies: [%s] }\n", pool))
-	if len(nodeYAML) > 0 {
-		sb.WriteString(fmt.Sprintf("  - { name: '自动选择', type: url-test, proxies: [%s], url: 'http://www.gstatic.com/generate_204', interval: 300 }\n", allNodes))
-	} else {
-		sb.WriteString("  - { name: '自动选择', type: select, proxies: ['DIRECT'] }\n")
-	}
-
-	// 专业分流组
-	// 国外业务：节点选择优先
-	intlGroups := []string{"Google", "YouTube", "ChatGPT", "Claude", "Netflix", "Spotify", "Telegram"}
-	for _, g := range intlGroups {
-		sb.WriteString(fmt.Sprintf("  - { name: '%s', type: select, proxies: ['节点选择', '自动选择', 'DIRECT', %s] }\n", g, allNodes))
-	}
-
-	// 国内/大厂业务：DIRECT 优先
-	directFirstGroups := []string{"微软服务", "哔哩哔哩", "115"}
-	for _, g := range directFirstGroups {
-		sb.WriteString(fmt.Sprintf("  - { name: '%s', type: select, proxies: ['DIRECT', '节点选择', '自动选择', %s] }\n", g, allNodes))
-	}
-
-	// 路由规则
-	sb.WriteString("\nrules:\n")
-	sb.WriteString("  - GEOIP,LAN,DIRECT,no-resolve\n")
-	sb.WriteString("  - DOMAIN-SUFFIX,local,DIRECT\n")
-	
-	sb.WriteString("  - RULE-SET,google,Google\n")
-	sb.WriteString("  - RULE-SET,youtube,YouTube\n")
-	sb.WriteString("  - RULE-SET,chatgpt,ChatGPT\n")
-	sb.WriteString("  - RULE-SET,claude,Claude\n")
-	sb.WriteString("  - RULE-SET,netflix,Netflix\n")
-	sb.WriteString("  - RULE-SET,spotify,Spotify\n")
-	sb.WriteString("  - RULE-SET,telegram,Telegram\n")
-	sb.WriteString("  - RULE-SET,bilibili,哔哩哔哩\n")
-	sb.WriteString("  - RULE-SET,microsoft,微软服务\n")
-	sb.WriteString("  - RULE-SET,one-one-five,115\n")
-	
-	sb.WriteString("  - MATCH,节点选择\n")
-
-	return sb.String()
+	return strings.Join(lines, "\n")
 }
 
 func renderQuantumultX(nodes []proxyNode, opts requestOptions) string {

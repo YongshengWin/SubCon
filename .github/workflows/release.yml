@@ -40,9 +40,9 @@ jobs:
             dist/surge-sub-converter-linux-amd64.tar.gz
             dist/surge-sub-converter-linux-arm64.tar.gz
           body: |
-            ## 🎉 v1.0.0 正式版发布
+            ## 🎉 v1.1.0 正式版发布
 
-            经过多轮迭代与逻辑重构，核心功能已趋于稳定，现正式发布 v1.0.0 版本。
+            基于外部 clash_template.yaml 模板动态注入重构完成，大幅度减少代码硬连接，并且进一步稳定功能。发布 v1.1.0 版本。
 
             ### 🚀 核心功能
             - **全平台支持**：新增对 **Shadowrocket（小火箭）** 纯节点列表订阅的支持。
