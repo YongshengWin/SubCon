@@ -94,6 +94,14 @@ type cacheEntry struct {
 	ExpiresAt time.Time
 }
 
+type linkEntry struct {
+	Token  string
+	Title  string
+	Target string
+	URL    string
+	Legacy bool
+}
+
 type converterCache struct {
 	mu    sync.RWMutex
 	items map[string]cacheEntry
@@ -319,7 +327,7 @@ func convertSubscription(ctx context.Context, cfg config, subURL string, opts re
 				log.Printf("[WARN] Failed to fetch %s: %v", redactURL(targetURL), err)
 				return
 			}
-			
+
 			// 自动尝试 Base64 解码订阅内容
 			decoded, err := decodeBase64(strings.TrimSpace(text))
 			if err == nil {
@@ -388,7 +396,7 @@ func splitURLs(s string) []string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "；", "\n")
 	s = strings.ReplaceAll(s, ";", "\n")
-	
+
 	lines := strings.Split(s, "\n")
 	var res []string
 	for _, l := range lines {
@@ -780,7 +788,7 @@ func buildCommonOptions(params map[string]string, opts requestOptions) []string 
 		options = append(options, "ws=true")
 		path := firstNonEmpty(params["path"], "/")
 		options = append(options, "ws-path="+path)
-		
+
 		// 恢复 ws-headers: Host，避免 CDN 节点因缺失 Host 无法连接的情况
 		host := firstNonEmpty(params["host"])
 		if host != "" {
@@ -961,7 +969,7 @@ func renderNode(node proxyNode) string {
 
 func renderClashProxy(node proxyNode) []string {
 	opts := parseOptionPairs(node.Options)
-	
+
 	// 使用单行括号格式 (Flow style) 输出 proxy，完全避免由于字符串换行导致的 alterId missing 解析错误
 	var parts []string
 	parts = append(parts, fmt.Sprintf("name: %s", yamlString(node.Name)))
@@ -1002,7 +1010,7 @@ func renderClashProxy(node proxyNode) []string {
 	if isTrue(opts["ws"]) {
 		parts = append(parts, "network: ws")
 		path := firstOrDefault(opts["ws-path"], "/")
-		
+
 		wsOptsStr := fmt.Sprintf("path: %s", path)
 		if header := opts["ws-headers"]; header != "" {
 			hParts := strings.SplitN(header, ":", 2)
@@ -1266,6 +1274,95 @@ func (c *converterCache) Set(key string, entry cacheEntry) {
 	c.mu.Unlock()
 }
 
+func parseLinkEntries(data []byte) []linkEntry {
+	lines := strings.Split(string(data), "\n")
+	entries := make([]linkEntry, 0, len(lines))
+	entryIndex := 0
+
+	for _, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+
+		entryIndex++
+		if parts := strings.SplitN(line, "|", 4); len(parts) == 4 {
+			entries = append(entries, linkEntry{
+				Token:  strings.TrimSpace(parts[0]),
+				Title:  strings.TrimSpace(parts[1]),
+				Target: strings.TrimSpace(parts[2]),
+				URL:    strings.TrimSpace(parts[3]),
+			})
+			continue
+		}
+
+		if parts := strings.SplitN(line, "|", 3); len(parts) == 3 {
+			entries = append(entries, linkEntry{
+				Token:  strconv.Itoa(entryIndex),
+				Title:  strings.TrimSpace(parts[0]),
+				Target: strings.TrimSpace(parts[1]),
+				URL:    strings.TrimSpace(parts[2]),
+				Legacy: true,
+			})
+		}
+	}
+
+	return entries
+}
+
+func serializeLinkEntries(entries []linkEntry) []byte {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	lines := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		lines = append(lines, fmt.Sprintf("%s|%s|%s|%s", entry.Token, entry.Title, entry.Target, entry.URL))
+	}
+	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
+func normalizeStoredSubscriptionURL(raw string) string {
+	raw = strings.ReplaceAll(raw, "\r\n", ";")
+	raw = strings.ReplaceAll(raw, "\n", ";")
+	raw = strings.ReplaceAll(raw, "\r", ";")
+	for strings.Contains(raw, ";;") {
+		raw = strings.ReplaceAll(raw, ";;", ";")
+	}
+	return strings.Trim(raw, ";")
+}
+
+func extractShortToken(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", errors.New("missing short link")
+	}
+
+	if strings.Contains(raw, "://") {
+		parsed, err := url.Parse(raw)
+		if err != nil {
+			return "", errors.New("invalid short link")
+		}
+		raw = parsed.Path
+	}
+
+	if idx := strings.LastIndex(raw, "/s/"); idx >= 0 {
+		raw = raw[idx+3:]
+	} else if strings.HasPrefix(raw, "s/") {
+		raw = strings.TrimPrefix(raw, "s/")
+	}
+
+	if idx := strings.IndexAny(raw, "?#"); idx >= 0 {
+		raw = raw[:idx]
+	}
+
+	raw = strings.Trim(raw, "/")
+	if raw == "" || strings.ContainsAny(raw, "|\r\n\t ") || strings.Contains(raw, "/") {
+		return "", errors.New("invalid short link")
+	}
+	return raw, nil
+}
+
 func handleShortLink(cfg config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -1286,35 +1383,15 @@ func handleShortLink(cfg config) http.HandlerFunc {
 			return
 		}
 
-		lines := strings.Split(string(data), "\n")
 		var target, urlStr string
 		found := false
 
-		// 改进的查找逻辑：支持 Token 匹配，并向后兼容数字 ID 索引
-		for i, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			parts := strings.Split(line, "|")
-			
-			// 格式 A: Token|Title|Target|URL (4列)
-			if len(parts) >= 4 && parts[0] == idStr {
-				target = strings.TrimSpace(parts[2])
-				urlStr = strings.TrimSpace(parts[3])
+		for _, entry := range parseLinkEntries(data) {
+			if entry.Token == idStr {
+				target = entry.Target
+				urlStr = entry.URL
 				found = true
 				break
-			}
-			
-			// 兼容格式 B: Title|Target|URL (3列) -> 仍然支持旧的数字 ID 访问
-			if len(parts) == 3 {
-				numericID, err := strconv.Atoi(idStr)
-				if err == nil && numericID == (i+1) {
-					target = strings.TrimSpace(parts[1])
-					urlStr = strings.TrimSpace(parts[2])
-					found = true
-					break
-				}
 			}
 		}
 
@@ -1362,8 +1439,10 @@ func handleShortLink(cfg config) http.HandlerFunc {
 var linksFileMu sync.Mutex
 
 type shortenRequest struct {
-	Target string `json:"target"`
-	URL    string `json:"url"`
+	Target        string `json:"target"`
+	URL           string `json:"url"`
+	ExistingShort string `json:"existingShort"`
+	Token         string `json:"token"`
 }
 
 func handleShortenAPI(cfg config) http.HandlerFunc {
@@ -1385,19 +1464,28 @@ func handleShortenAPI(cfg config) http.HandlerFunc {
 		target := strings.TrimSpace(req.Target)
 		urlStr := strings.TrimSpace(req.URL)
 		if target == "" || urlStr == "" {
-			http.Error(w, "target and url are required", http.StatusBadRequest)
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"success": false,
+				"error":   "target and url are required",
+			})
 			return
 		}
 
-		// 核心修复：防止换行符破坏 subscriptions.txt 的行结构
-		urlStr = strings.ReplaceAll(urlStr, "\r\n", ";")
-		urlStr = strings.ReplaceAll(urlStr, "\n", ";")
-		urlStr = strings.ReplaceAll(urlStr, "\r", ";")
-		// 清理可能产生的重复分号
-		for strings.Contains(urlStr, ";;") {
-			urlStr = strings.ReplaceAll(urlStr, ";;", ";")
+		urlStr = normalizeStoredSubscriptionURL(urlStr)
+
+		existingToken := ""
+		existingInput := strings.TrimSpace(firstNonEmpty(req.Token, req.ExistingShort))
+		if existingInput != "" {
+			token, err := extractShortToken(existingInput)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{
+					"success": false,
+					"error":   err.Error(),
+				})
+				return
+			}
+			existingToken = token
 		}
-		urlStr = strings.Trim(urlStr, ";")
 
 		linksFileMu.Lock()
 		defer linksFileMu.Unlock()
@@ -1406,71 +1494,84 @@ func handleShortenAPI(cfg config) http.HandlerFunc {
 		if err != nil && !os.IsNotExist(err) {
 			log.Printf("failed to read links file %s: %v", cfg.LinksFile, err)
 		}
-		lines := strings.Split(string(data), "\n")
-		
+		entries := parseLinkEntries(data)
 		token := ""
-		needMigration := false
-		var newLines []string
+		updated := false
+		needWrite := false
 
-		// 检查是否已有该链接，并顺便执行旧数据格式检查（迁移）
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			parts := strings.Split(line, "|")
-			
-			if len(parts) == 3 {
-				// 旧格式检测：自动分配 Token
-				oldTitle, oldTarget, oldUrl := parts[0], parts[1], parts[2]
-				newToken := generateRandomToken(32)
-				newEntry := fmt.Sprintf("%s|%s|%s|%s", newToken, oldTitle, oldTarget, oldUrl)
-				newLines = append(newLines, newEntry)
-				needMigration = true
-				
-				if oldTarget == target && oldUrl == urlStr {
-					token = newToken
-				}
-			} else if len(parts) >= 4 {
-				// 新格式
-				newLines = append(newLines, line)
-				if parts[2] == target && parts[3] == urlStr {
-					token = parts[0]
-				}
+		for _, entry := range entries {
+			if entry.Legacy {
+				needWrite = true
 			}
 		}
 
-		// 如果发现旧格式链接，立即保存迁移后的完整文件
-		if needMigration {
-			_ = os.WriteFile(cfg.LinksFile, []byte(strings.Join(newLines, "\n")+"\n"), 0644)
-		}
-
-		// 如果是全新的链接
-		if token == "" {
-			token = generateRandomToken(32)
-			// 使用带时间戳的默认名称替代单一的“网页生成”
-			title := time.Now().Format("聚合订阅-0102-1504")
-			newLine := fmt.Sprintf("%s|%s|%s|%s\n", token, title, target, urlStr)
-			f, err := os.OpenFile(cfg.LinksFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-			if err != nil {
-				log.Printf("failed to open links file %s: %v", cfg.LinksFile, err)
-				http.Error(w, "server error", http.StatusInternalServerError)
+		if existingToken != "" {
+			found := false
+			for i := range entries {
+				if entries[i].Token != existingToken {
+					continue
+				}
+				found = true
+				token = entries[i].Token
+				if entries[i].Target != target || entries[i].URL != urlStr {
+					entries[i].Target = target
+					entries[i].URL = urlStr
+					updated = true
+					needWrite = true
+				}
+				break
+			}
+			if !found {
+				writeJSON(w, http.StatusNotFound, map[string]any{
+					"success": false,
+					"error":   "short link not found",
+				})
 				return
 			}
-			defer f.Close()
-			if _, err := f.WriteString(newLine); err != nil {
-				log.Printf("failed to write links file: %v", err)
-				http.Error(w, "server error", http.StatusInternalServerError)
+		} else {
+			for _, entry := range entries {
+				if entry.Target == target && entry.URL == urlStr {
+					token = entry.Token
+					break
+				}
+			}
+
+			if token == "" {
+				token = generateRandomToken(32)
+				if token == "" {
+					writeJSON(w, http.StatusInternalServerError, map[string]any{
+						"success": false,
+						"error":   "failed to generate token",
+					})
+					return
+				}
+				entries = append(entries, linkEntry{
+					Token:  token,
+					Title:  time.Now().Format("聚合订阅-0102-1504"),
+					Target: target,
+					URL:    urlStr,
+				})
+				needWrite = true
+			}
+		}
+
+		if needWrite {
+			if err := os.WriteFile(cfg.LinksFile, serializeLinkEntries(entries), 0644); err != nil {
+				log.Printf("failed to write links file %s: %v", cfg.LinksFile, err)
+				writeJSON(w, http.StatusInternalServerError, map[string]any{
+					"success": false,
+					"error":   "server error",
+				})
 				return
 			}
 		}
 
-		w.Header().Set("Content-Type", "application/json")
 		shortPath := fmt.Sprintf("/s/%s", token)
 		log.Printf("[DEBUG] Secure short link generated: %s", shortPath)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"success":  true,
 			"shortUrl": shortPath,
+			"updated":  updated,
 		})
 	}
 }

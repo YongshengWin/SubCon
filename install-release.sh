@@ -324,33 +324,56 @@ detect_tls_mode() {
   echo "未启用"
 }
 
+normalize_link_source() {
+  printf '%s' "$1" | tr '\r\n' ';' | sed 's/;;*/;/g; s/^;//; s/;$//'
+}
+
+normalize_links_file() {
+  [[ -f "${LINKS_FILE}" ]] || touch "${LINKS_FILE}"
+
+  local tmp migrated line index
+  tmp="$(mktemp)"
+  migrated=0
+  index=0
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "${line//[[:space:]]/}" ]] && continue
+
+    index=$((index+1))
+    local col1 col2 col3 col4
+    IFS='|' read -r col1 col2 col3 col4 <<< "${line}"
+
+    if [[ -n "${col4:-}" ]]; then
+      printf '%s|%s|%s|%s\n' "${col1}" "${col2}" "${col3}" "${col4}" >> "${tmp}"
+    elif [[ -n "${col3:-}" ]]; then
+      # 旧格式迁移为 4 列，并把当前数字短链固化成 token，避免后续更新后短链漂移。
+      printf '%s|%s|%s|%s\n' "${index}" "${col1}" "${col2}" "${col3}" >> "${tmp}"
+      migrated=1
+    else
+      printf '%s\n' "${line}" >> "${tmp}"
+    fi
+  done < "${LINKS_FILE}"
+
+  if [[ "${migrated}" == "1" ]]; then
+    mv "${tmp}" "${LINKS_FILE}"
+  else
+    rm -f "${tmp}"
+  fi
+}
+
 list_links() {
   load_env
   local base
   base="$(public_base)"
+  normalize_links_file
   if [[ ! -s "${LINKS_FILE}" ]]; then
     warn "暂无已保存的订阅转换链接"
     return
   fi
   echo
   local i=1
-  # 修改 read 逻辑：兼容老版本 3 列和新版本 4 列 Token 格式
-  while IFS='|' read -r col1 col2 col3 col4; do
-    local token name target source
-    if [[ -n "${col4}" ]]; then
-      # 4 列格式: Token|名称|目标|来源
-      token="${col1}"
-      name="${col2}"
-      target="${col3}"
-      source="${col4}"
-    else
-      # 3 列格式: 名称|目标|来源
-      token="${i}" # 旧链接暂时以行号 fallback
-      name="${col1}"
-      target="${col2}"
-      source="${col3}"
-    fi
-
+  while IFS='|' read -r token name target source; do
     [[ -z "${name}" ]] && continue
     printf "  ${BOLD}${CYAN}%d.${NC} %s\n" "$i" "${name}"
     printf "     ${DIM}目标:${NC} %s\n" "${target}"
@@ -372,18 +395,60 @@ add_link() {
     *) fail "不支持的目标客户端"; return 1 ;;
   esac
   [[ -z "${name}" || -z "${source}" ]] && { fail "名称和订阅URL不能为空"; return 1; }
-  
-  # 规范化清理 URL 中的换行符，防止破坏文件结构
-  source="$(echo "${source}" | tr '\r\n' ';' | sed 's/;;*/;/g; s/^;//; s/;$//')"
-  
+
+  source="$(normalize_link_source "${source}")"
+
   local token
   token="$(generate_token 32)"
   echo "${token}|${name}|${target}|${source}" >> "${LINKS_FILE}"
   ok "已添加 (Token: ${token})"
 }
 
+update_link() {
+  load_env
+  normalize_links_file
+  if [[ ! -s "${LINKS_FILE}" ]]; then
+    warn "暂无可更新项目"
+    return
+  fi
+
+  local base index entry token name target source new_source
+  base="$(public_base)"
+  list_links
+  read -r -p "$(printf "${CYAN}输入要更新的序号: ${NC}")" index
+  [[ ! "${index}" =~ ^[0-9]+$ ]] && { fail "序号无效"; return 1; }
+
+  entry="$(awk -F'|' -v idx="${index}" 'BEGIN{n=0} NF{n++; if(n==idx){print $1 "|" $2 "|" $3 "|" $4; exit}}' "${LINKS_FILE}")"
+  [[ -z "${entry}" ]] && { fail "未找到对应序号"; return 1; }
+
+  IFS='|' read -r token name target source <<< "${entry}"
+  echo
+  printf "  ${DIM}当前名称:${NC} %s\n" "${name}"
+  printf "  ${DIM}目标客户端:${NC} %s\n" "${target}"
+  printf "  ${DIM}当前短链:${NC} ${GREEN}%s/s/%s${NC}\n" "${base}" "${token}"
+  printf "  ${DIM}当前原链:${NC} %s\n" "${source}"
+  echo
+  read -r -p "$(printf "${CYAN}新的原始订阅URL${NC}(留空取消): ")" new_source
+  [[ -z "${new_source}" ]] && { warn "已取消"; return 0; }
+
+  new_source="$(normalize_link_source "${new_source}")"
+  awk -F'|' -v idx="${index}" -v OFS='|' -v new_source="${new_source}" '
+    BEGIN{n=0}
+    NF{
+      n++
+      if(n==idx){
+        $4=new_source
+      }
+    }
+    { print $0 }
+  ' "${LINKS_FILE}" > "${LINKS_FILE}.tmp"
+  mv "${LINKS_FILE}.tmp" "${LINKS_FILE}"
+  ok "已更新原始订阅链接，短链保持不变: ${base}/s/${token}"
+}
+
 delete_link() {
   load_env
+  normalize_links_file
   if [[ ! -s "${LINKS_FILE}" ]]; then
     warn "暂无可删除项目"
     return
@@ -777,10 +842,11 @@ menu() {
   printf "   ${BOLD}5.${NC}  查看订阅链接\n"
   printf "   ${BOLD}6.${NC}  添加转换订阅链接\n"
   printf "   ${BOLD}7.${NC}  删除转换订阅链接\n"
+  printf "   ${BOLD}8.${NC}  更新原始订阅链接\n"
   echo
   printf "  ${DIM}── 网络设置 ─────────────────────────${NC}\n"
-  printf "   ${BOLD}8.${NC}  HTTPS / 域名设置\n"
-  printf "   ${BOLD}9.${NC}  绑定公网 IP\n"
+  printf "   ${BOLD}9.${NC}  HTTPS / 域名设置\n"
+  printf "   ${BOLD}10.${NC} 绑定公网 IP\n"
   echo
   printf "   ${BOLD}0.${NC}  退出\n"
   echo
@@ -793,8 +859,9 @@ menu() {
     5) list_links ;;
     6) add_link ;;
     7) delete_link ;;
-    8) https_menu ;;
-    9) bind_public_ip ;;
+    8) update_link ;;
+    9) https_menu ;;
+    10) bind_public_ip ;;
     0) exit 0 ;;
     *) menu ;;
   esac
@@ -809,8 +876,9 @@ if [[ $# -gt 0 ]]; then
     5|list) list_links ;;
     6|add) add_link ;;
     7|delete|del|remove) delete_link ;;
-    8|domain|https|port|ssl|cert|proxy|tls|native-https) https_menu ;;
-    9|bind-ip|ip) bind_public_ip ;;
+    8|update-link|edit|change-source) update_link ;;
+    9|domain|https|port|ssl|cert|proxy|tls|native-https) https_menu ;;
+    10|bind-ip|ip) bind_public_ip ;;
     *) menu ;;
   esac
 else

@@ -141,7 +141,7 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!DOCTYPE html>
   <div class="shell">
     <div class="panel">
       <h1>订阅转换</h1>
-      <p>输入原始订阅 URL，选择目标客户端，直接生成转换链接。</p>
+      <p>输入原始订阅 URL，选择目标客户端，可直接生成短链，也可在短链地址不变的情况下更新原始链接。</p>
 
       <div class="field">
         <label for="sub-url">原始订阅 URL (多链接支持)</label>
@@ -162,8 +162,14 @@ URL2;URL3；URL4"></textarea>
         </select>
       </div>
 
+      <div class="field">
+        <label for="existing-short">现有短链 / Token（仅更新原链时填写）</label>
+        <input id="existing-short" type="text" placeholder="支持完整短链、/s/&lt;token&gt; 或直接粘贴 token">
+      </div>
+
       <div class="actions">
-        <button class="primary" id="preview-btn">生成链接</button>
+        <button class="primary" id="preview-btn">生成短链</button>
+        <button class="secondary" id="update-btn" type="button">更新原链</button>
         <button class="secondary" id="copy-link-btn" type="button">复制链接</button>
         <button class="secondary" id="open-link-btn" type="button">打开结果</button>
       </div>
@@ -193,11 +199,13 @@ URL2;URL3；URL4"></textarea>
     const el = {
       subURL: document.getElementById('sub-url'),
       target: document.getElementById('target'),
+      existingShort: document.getElementById('existing-short'),
       convertLink: document.getElementById('convert-link'),
       output: document.getElementById('output'),
       status: document.getElementById('status'),
       pillRow: document.getElementById('pill-row'),
       previewBtn: document.getElementById('preview-btn'),
+      updateBtn: document.getElementById('update-btn'),
       copyLinkBtn: document.getElementById('copy-link-btn'),
       openLinkBtn: document.getElementById('open-link-btn'),
       copyShortBtn: document.getElementById('copy-short-btn'),
@@ -224,14 +232,20 @@ URL2;URL3；URL4"></textarea>
       });
     }
 
-    async function preview() {
+    async function preview(mode) {
       const source = el.subURL.value.trim();
       if (!source) {
         setStatus('先填原始订阅 URL。', 'error');
         return;
       }
+      const isUpdate = mode === 'update';
+      const existingShort = el.existingShort.value.trim();
+      if (isUpdate && !existingShort) {
+        setStatus('更新原链时需要填写现有短链或 token。', 'error');
+        return;
+      }
       el.convertLink.value = '';
-      setStatus('正在转换...', '');
+      setStatus(isUpdate ? '正在更新原链...' : '正在转换...', '');
       el.output.textContent = '处理中...';
       try {
         const resp = await fetch('/api/convert', {
@@ -253,17 +267,29 @@ URL2;URL3；URL4"></textarea>
           const shortResp = await fetch('/api/shorten', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ target: targetKey, url: source })
+            body: JSON.stringify({
+              target: targetKey,
+              url: source,
+              existingShort: isUpdate ? existingShort : ''
+            })
           });
           const shortData = await shortResp.json();
-          if (shortData.success && shortData.shortUrl) {
-            el.convertLink.value = window.location.origin + shortData.shortUrl;
+          if (!shortResp.ok || !shortData.success) {
+            throw new Error(shortData.error || (isUpdate ? '更新原链失败' : '短链生成失败'));
+          }
+          if (shortData.shortUrl) {
+            const fullShortLink = window.location.origin + shortData.shortUrl;
+            el.convertLink.value = fullShortLink;
+            if (isUpdate) {
+              el.existingShort.value = fullShortLink;
+              setStatus(shortData.updated ? '原始链接已更新，短链保持不变。' : '原始链接未变化，短链保持不变。', 'ok');
+            }
           } else {
-            setStatus('转换完成，但短链生成失败。', 'error');
+            setStatus(isUpdate ? '转换完成，但更新原链失败。' : '转换完成，但短链生成失败。', 'error');
           }
         } catch (e) {
           console.error('Failed to get short URL', e);
-          setStatus('转换完成，但短链接口不可用。', 'error');
+          setStatus(e.message || (isUpdate ? '转换完成，但更新原链接口不可用。' : '转换完成，但短链接口不可用。'), 'error');
         }
       } catch (err) {
         renderPills({ nodeCount: 0, ignoredTypes: [] });
@@ -285,7 +311,8 @@ URL2;URL3；URL4"></textarea>
       }
     }
 
-    el.previewBtn.addEventListener('click', preview);
+    el.previewBtn.addEventListener('click', () => preview('create'));
+    el.updateBtn.addEventListener('click', () => preview('update'));
     el.copyLinkBtn.addEventListener('click', () => {
       const val = el.convertLink.value;
       if (!val) {
