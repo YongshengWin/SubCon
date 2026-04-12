@@ -767,7 +767,7 @@ func parseShadowsocks(link string, opts requestOptions) (proxyNode, error) {
 }
 
 func buildCommonOptions(params map[string]string, opts requestOptions) []string {
-	options := make([]string, 0, 8)
+	options := make([]string, 0, 12)
 
 	security := strings.ToLower(params["security"])
 	sni := firstNonEmpty(params["sni"], params["peer"], params["servername"], params["serverName"])
@@ -775,6 +775,18 @@ func buildCommonOptions(params map[string]string, opts requestOptions) []string 
 
 	if security == "tls" || security == "reality" {
 		options = append(options, "tls=true")
+		if security == "reality" {
+			options = append(options, "tls-security=reality")
+			if pbk := firstNonEmpty(params["pbk"], params["publicKey"], params["public-key"]); pbk != "" {
+				options = append(options, "reality-public-key="+pbk)
+			}
+			if sid := firstNonEmpty(params["sid"], params["shortId"], params["short-id"]); sid != "" {
+				options = append(options, "reality-short-id="+sid)
+			}
+			if fp := firstNonEmpty(params["fp"], params["fingerprint"], params["client-fingerprint"]); fp != "" {
+				options = append(options, "client-fingerprint="+fp)
+			}
+		}
 		if sni != "" {
 			options = append(options, "sni="+sni)
 		}
@@ -1607,12 +1619,13 @@ func renderShadowrocket(nodes []proxyNode, opts requestOptions) string {
 			auth := base64.StdEncoding.EncodeToString([]byte(method + ":" + pass))
 			link = fmt.Sprintf("ss://%s@%s:%d#%s", auth, n.Host, n.Port, url.QueryEscape(n.Name))
 		case "vmess":
+			id := firstNonEmpty(params["username"], params["password"])
 			vconfig := map[string]any{
 				"v":    "2",
 				"ps":   n.Name,
 				"add":  n.Host,
 				"port": n.Port,
-				"id":   params["password"],
+				"id":   id,
 				"aid":  params["alterId"],
 				"net":  "tcp",
 				"type": "none",
@@ -1637,7 +1650,7 @@ func renderShadowrocket(nodes []proxyNode, opts requestOptions) string {
 			pass := params["password"]
 			link = fmt.Sprintf("trojan://%s@%s:%d?peer=%s#%s", pass, n.Host, n.Port, url.QueryEscape(params["sni"]), url.QueryEscape(n.Name))
 		case "vless":
-			pass := params["password"]
+			pass := firstNonEmpty(params["username"], params["password"])
 			query := url.Values{}
 			if params["ws"] == "true" {
 				query.Set("type", "ws")
@@ -1645,11 +1658,23 @@ func renderShadowrocket(nodes []proxyNode, opts requestOptions) string {
 				if h := params["ws-headers"]; strings.HasPrefix(h, "Host:") {
 					query.Set("host", strings.TrimPrefix(h, "Host:"))
 				}
+			} else if svcName := params["grpc-service-name"]; svcName != "" {
+				query.Set("type", "grpc")
+				query.Set("serviceName", svcName)
 			}
 			if params["tls"] == "true" {
-				query.Set("security", "tls")
+				query.Set("security", firstOrDefault(params["tls-security"], "tls"))
 				if sni := params["sni"]; sni != "" {
 					query.Set("sni", sni)
+				}
+				if pbk := params["reality-public-key"]; pbk != "" {
+					query.Set("pbk", pbk)
+				}
+				if sid := params["reality-short-id"]; sid != "" {
+					query.Set("sid", sid)
+				}
+				if fp := params["client-fingerprint"]; fp != "" {
+					query.Set("fp", fp)
 				}
 			}
 			link = fmt.Sprintf("vless://%s@%s:%d?%s#%s", pass, n.Host, n.Port, query.Encode(), url.QueryEscape(n.Name))
