@@ -13,49 +13,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
 
-      - name: Build
+      - name: Build Release Assets
         run: |
-          mkdir -p dist
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o dist/surge-sub-converter .
-          cd dist
-          tar -czf surge-sub-converter-linux-amd64.tar.gz surge-sub-converter
-          rm surge-sub-converter
-          cd ..
-          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o dist/surge-sub-converter .
-          cd dist
-          tar -czf surge-sub-converter-linux-arm64.tar.gz surge-sub-converter
-          rm surge-sub-converter
+          chmod +x package-release.sh
+          ./package-release.sh
 
       - name: Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
+          name: ${{ github.ref_name }}
           files: |
             dist/surge-sub-converter-linux-amd64.tar.gz
             dist/surge-sub-converter-linux-arm64.tar.gz
-          body: |
-            ## 🎉 v1.1.0 正式版发布
-
-            基于外部 clash_template.yaml 模板动态注入重构完成，大幅度减少代码硬连接，并且进一步稳定功能。发布 v1.1.0 版本。
-
-            ### 🚀 核心功能
-            - **全平台支持**：新增对 **Shadowrocket（小火箭）** 纯节点列表订阅的支持。
-            - **极简分流体系**：引入 **Remote Rule Providers**，内置 ChatGPT、Google、YouTube、Netflix、Bilibili 等专业分流组，支持国内外流量自动分流。
-            - **高兼容性输出**：Clash/Stash 采用 Flow Style (Inline JSON-like) 输出，彻底解决 YAML 解析时的缩进与换行冲突。
-            - **高性能后端**：Go 语言编写，内置内存缓存机制，秒级响应订阅转换请求。
-            - **一键部署**：完善的 `sub` 命令行工具，支持 HTTPS 证书复用、订阅管理与自动更新。
-
-            ### 🛠 修复与优化
-            - 修复了 Clash 策略组中的中文引号解析问题。
-            - 补全了 `ws-headers: Host` 等关键参数。
-            - 移除了臃肿的 4000+ 行内置规则，极大提升加载速度。
-
-            感谢使用！
+          generate_release_notes: true
           draft: false
           prerelease: false
