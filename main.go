@@ -1012,6 +1012,16 @@ func renderClashProxy(node proxyNode) []string {
 	if sni := opts["sni"]; sni != "" {
 		parts = append(parts, fmt.Sprintf("servername: %s", sni))
 	}
+	if fp := opts["client-fingerprint"]; fp != "" {
+		parts = append(parts, fmt.Sprintf("client-fingerprint: %s", yamlString(fp)))
+	}
+	if pubKey := opts["reality-public-key"]; pubKey != "" {
+		realityParts := []string{fmt.Sprintf("public-key: %s", yamlString(pubKey))}
+		if shortID := opts["reality-short-id"]; shortID != "" {
+			realityParts = append(realityParts, fmt.Sprintf("short-id: %s", yamlString(shortID)))
+		}
+		parts = append(parts, fmt.Sprintf("reality-opts: { %s }", strings.Join(realityParts, ", ")))
+	}
 	if isTrue(opts["skip-cert-verify"]) {
 		parts = append(parts, "skip-cert-verify: true")
 	}

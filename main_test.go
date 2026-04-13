@@ -181,3 +181,44 @@ func TestRenderShadowrocketVMessUsesUUID(t *testing.T) {
 		t.Fatalf("shadowrocket vmess config missing UUID:\n%s", string(decoded))
 	}
 }
+
+func TestRenderClashProxyVLessIncludesRealityOptions(t *testing.T) {
+	t.Parallel()
+
+	node := proxyNode{
+		Name:      "demo-clash-vless",
+		SurgeType: "vless",
+		Host:      "edge.example.com",
+		Port:      443,
+		Options: []string{
+			"username=123e4567-e89b-12d3-a456-426614174000",
+			"tls=true",
+			"sni=www.apple.com",
+			"skip-cert-verify=true",
+			"client-fingerprint=chrome",
+			"reality-public-key=test-public-key",
+			"reality-short-id=abcd1234",
+			"flow=xtls-rprx-vision",
+		},
+	}
+
+	lines := renderClashProxy(node)
+	if len(lines) != 1 {
+		t.Fatalf("unexpected clash proxy line count: %d", len(lines))
+	}
+	got := lines[0]
+
+	for _, want := range []string{
+		"type: vless",
+		"uuid: 123e4567-e89b-12d3-a456-426614174000",
+		"flow: xtls-rprx-vision",
+		"tls: true",
+		"servername: www.apple.com",
+		"client-fingerprint: 'chrome'",
+		"reality-opts: { public-key: 'test-public-key', short-id: 'abcd1234' }",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("clash vless line missing %q:\n%s", want, got)
+		}
+	}
+}
