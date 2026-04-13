@@ -69,7 +69,7 @@ reset_dir "${VERIFY_DIR}"
 echo "构建发布包 ${VERSION}"
 (
   cd "${SCRIPT_DIR}"
-  VERSION="${VERSION}" OUT_DIR=".release-build/upload" ./package-release.sh
+  VERSION="${VERSION}" OUT_DIR=".release-build/upload" bash ./package-release.sh
 )
 
 assets=(
