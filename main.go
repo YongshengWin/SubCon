@@ -767,7 +767,7 @@ func parseShadowsocks(link string, opts requestOptions) (proxyNode, error) {
 }
 
 func buildCommonOptions(params map[string]string, opts requestOptions) []string {
-	options := make([]string, 0, 12)
+	options := make([]string, 0, 16)
 
 	security := strings.ToLower(params["security"])
 	sni := firstNonEmpty(params["sni"], params["peer"], params["servername"], params["serverName"])
@@ -810,6 +810,34 @@ func buildCommonOptions(params map[string]string, opts requestOptions) []string 
 		if serviceName := firstNonEmpty(params["serviceName"], params["service_name"]); serviceName != "" {
 			options = append(options, "grpc-service-name="+serviceName)
 		}
+	case "xhttp":
+		options = append(options, "xhttp=true")
+		if path := firstNonEmpty(params["path"], "/"); path != "" {
+			options = append(options, "xhttp-path="+path)
+		}
+		if host := firstNonEmpty(params["host"]); host != "" {
+			options = append(options, "xhttp-host="+host)
+		}
+		if mode := firstNonEmpty(params["mode"]); mode != "" {
+			options = append(options, "xhttp-mode="+mode)
+		}
+		if noGRPCHeader := firstNonEmpty(params["noGRPCHeader"], params["no-grpc-header"]); noGRPCHeader != "" {
+			options = append(options, "xhttp-no-grpc-header="+noGRPCHeader)
+		}
+		if padding := firstNonEmpty(params["xPaddingBytes"], params["x-padding-bytes"]); padding != "" {
+			options = append(options, "xhttp-padding-bytes="+padding)
+		}
+		if postBytes := firstNonEmpty(params["scMaxEachPostBytes"], params["sc-max-each-post-bytes"]); postBytes != "" {
+			options = append(options, "xhttp-sc-max-each-post-bytes="+postBytes)
+		}
+	}
+
+	if encryption, ok := params["encryption"]; ok {
+		encryption = strings.TrimSpace(encryption)
+		if strings.EqualFold(encryption, "none") {
+			encryption = ""
+		}
+		options = append(options, "encryption="+encryption)
 	}
 
 	if opts.AllowUDP {
@@ -999,6 +1027,9 @@ func renderClashProxy(node proxyNode) []string {
 		if flow := opts["flow"]; flow != "" {
 			parts = append(parts, fmt.Sprintf("flow: %s", flow))
 		}
+		if encryption, ok := opts["encryption"]; ok {
+			parts = append(parts, fmt.Sprintf("encryption: %s", yamlString(encryption)))
+		}
 	case "trojan":
 		parts = append(parts, fmt.Sprintf("password: %s", opts["password"]))
 	case "ss":
@@ -1041,6 +1072,25 @@ func renderClashProxy(node proxyNode) []string {
 			}
 		}
 		parts = append(parts, fmt.Sprintf("ws-opts: { %s }", wsOptsStr))
+	} else if isTrue(opts["xhttp"]) {
+		parts = append(parts, "network: xhttp")
+		xhttpParts := []string{fmt.Sprintf("path: %s", yamlString(firstOrDefault(opts["xhttp-path"], "/")))}
+		if host := opts["xhttp-host"]; host != "" {
+			xhttpParts = append(xhttpParts, fmt.Sprintf("host: %s", yamlString(host)))
+		}
+		if mode := opts["xhttp-mode"]; mode != "" {
+			xhttpParts = append(xhttpParts, fmt.Sprintf("mode: %s", yamlString(mode)))
+		}
+		if noGRPCHeader := opts["xhttp-no-grpc-header"]; noGRPCHeader != "" {
+			xhttpParts = append(xhttpParts, fmt.Sprintf("no-grpc-header: %s", strings.ToLower(noGRPCHeader)))
+		}
+		if padding := opts["xhttp-padding-bytes"]; padding != "" {
+			xhttpParts = append(xhttpParts, fmt.Sprintf("x-padding-bytes: %s", yamlString(padding)))
+		}
+		if postBytes := opts["xhttp-sc-max-each-post-bytes"]; postBytes != "" {
+			xhttpParts = append(xhttpParts, fmt.Sprintf("sc-max-each-post-bytes: %s", postBytes))
+		}
+		parts = append(parts, fmt.Sprintf("xhttp-opts: { %s }", strings.Join(xhttpParts, ", ")))
 	} else if svcName := opts["grpc-service-name"]; svcName != "" {
 		parts = append(parts, "network: grpc")
 		parts = append(parts, fmt.Sprintf("grpc-opts: { grpc-service-name: %s }", svcName))

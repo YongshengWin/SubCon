@@ -222,3 +222,36 @@ func TestRenderClashProxyVLessIncludesRealityOptions(t *testing.T) {
 		}
 	}
 }
+
+func TestParseVLessXHTTPRendersClashTransport(t *testing.T) {
+	t.Parallel()
+
+	link := "vless://123e4567-e89b-12d3-a456-426614174000@rfc.example.com:53985?type=xhttp&encryption=none&path=%2Fdsiouofehsf&host=&mode=auto&security=reality&pbk=test-public-key&fp=chrome&sni=www.apple.com&sid=1f#demo"
+	node, err := parseVLess(link, requestOptions{AllowUDP: true})
+	if err != nil {
+		t.Fatalf("parse vless xhttp link: %v", err)
+	}
+
+	lines := renderClashProxy(node)
+	if len(lines) != 1 {
+		t.Fatalf("unexpected clash proxy line count: %d", len(lines))
+	}
+	got := lines[0]
+
+	for _, want := range []string{
+		"type: vless",
+		"uuid: 123e4567-e89b-12d3-a456-426614174000",
+		"udp: true",
+		"tls: true",
+		"servername: www.apple.com",
+		"client-fingerprint: 'chrome'",
+		"reality-opts: { public-key: 'test-public-key', short-id: '1f' }",
+		"encryption: ''",
+		"network: xhttp",
+		"xhttp-opts: { path: '/dsiouofehsf', mode: 'auto' }",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("clash vless xhttp line missing %q:\n%s", want, got)
+		}
+	}
+}

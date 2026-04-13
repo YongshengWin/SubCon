@@ -93,6 +93,16 @@ https://github.com/YongshengWin/SubCon/releases/download/<tag>/
 
 如果你想手动指定版本，也可以覆盖：
 
+如果你是直接发布到 GitHub Release，推荐使用固定工作目录的发布脚本：
+
+```bash
+git push origin main --follow-tags
+chmod +x publish-release.sh
+VERSION=vX.Y.Z ./publish-release.sh
+```
+
+`publish-release.sh` 会复用 `.release-build/upload` 和 `.release-build/verify`，自动上传并回传校验 release 资产，避免每次在仓库根目录新建版本号文件夹。
+
 ```bash
 VERSION=vX.Y.Z bash install-release.sh
 ```
