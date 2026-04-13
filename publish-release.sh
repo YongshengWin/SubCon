@@ -58,7 +58,7 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! git -C "${SCRIPT_DIR}" rev-parse "${VERSION}^{tag}" >/dev/null 2>&1; then
+if ! git -C "${SCRIPT_DIR}" show-ref --verify --quiet "refs/tags/${VERSION}"; then
   echo "本地缺少 tag ${VERSION}，请先创建并推送 tag" >&2
   exit 1
 fi
