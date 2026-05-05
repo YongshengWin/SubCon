@@ -561,6 +561,8 @@ func parseProxy(link string, opts requestOptions) (proxyNode, error) {
 		return parseTrojan(link, opts)
 	case strings.HasPrefix(link, "ss://"):
 		return parseShadowsocks(link, opts)
+	case strings.HasPrefix(link, "hysteria2://"), strings.HasPrefix(link, "hy2://"):
+		return parseHysteria2(link, opts)
 	default:
 		return proxyNode{}, errors.New("unsupported link type")
 	}
@@ -761,6 +763,73 @@ func parseShadowsocks(link string, opts requestOptions) (proxyNode, error) {
 		Name:      sanitizeName(name),
 		SurgeType: "ss",
 		Host:      host,
+		Port:      port,
+		Options:   options,
+	}, nil
+}
+
+func parseHysteria2(link string, opts requestOptions) (proxyNode, error) {
+	// 兼容 hy2:// 前缀，统一转为 hysteria2:// 再用标准 URL 解析
+	normalized := link
+	if strings.HasPrefix(link, "hy2://") {
+		normalized = "hysteria2://" + strings.TrimPrefix(link, "hy2://")
+	}
+
+	parsed, err := url.Parse(normalized)
+	if err != nil {
+		return proxyNode{}, fmt.Errorf("invalid hysteria2 link: %w", err)
+	}
+
+	port, err := normalizePort(parsed.Port(), 443)
+	if err != nil {
+		return proxyNode{}, err
+	}
+
+	password := ""
+	if parsed.User != nil {
+		password = parsed.User.Username()
+	}
+
+	query := parsed.Query()
+	sni := query.Get("sni")
+	if sni == "" {
+		sni = parsed.Hostname()
+	}
+
+	options := []string{
+		"password=" + password,
+		"download-bandwidth=10000",
+	}
+
+	if sni != "" {
+		options = append(options, "sni="+sni)
+	}
+
+	// insecure 参数或全局 skip-cert-verify
+	if query.Get("insecure") == "1" || opts.SkipCertVerify {
+		options = append(options, "skip-cert-verify=true")
+	}
+
+	if obfs := query.Get("obfs"); obfs != "" {
+		options = append(options, "obfs="+obfs)
+		if obfsPwd := query.Get("obfs-password"); obfsPwd != "" {
+			options = append(options, "obfs-password="+obfsPwd)
+		}
+	}
+
+	if pinSHA256 := query.Get("pinSHA256"); pinSHA256 != "" {
+		options = append(options, "server-cert-fingerprint-sha256="+pinSHA256)
+	}
+
+	if opts.AllowUDP {
+		options = append(options, "udp-relay=true")
+	}
+
+	name := fragmentOrHost(parsed)
+	return proxyNode{
+		Name:      sanitizeName(name),
+		SurgeType: "hysteria2",
+		Host:      parsed.Hostname(),
 		Port:      port,
 		Options:   options,
 	}, nil
@@ -1035,6 +1104,20 @@ func renderClashProxy(node proxyNode) []string {
 	case "ss":
 		parts = append(parts, fmt.Sprintf("cipher: %s", opts["encrypt-method"]))
 		parts = append(parts, fmt.Sprintf("password: %s", opts["password"]))
+	case "hysteria2":
+		parts = append(parts, fmt.Sprintf("password: %s", opts["password"]))
+		if bw := opts["download-bandwidth"]; bw != "" {
+			parts = append(parts, fmt.Sprintf("down: \"%s Mbps\"", bw))
+		}
+		if obfs := opts["obfs"]; obfs != "" {
+			parts = append(parts, fmt.Sprintf("obfs: %s", obfs))
+			if obfsPwd := opts["obfs-password"]; obfsPwd != "" {
+				parts = append(parts, fmt.Sprintf("obfs-password: %s", obfsPwd))
+			}
+		}
+		if fp := opts["server-cert-fingerprint-sha256"]; fp != "" {
+			parts = append(parts, fmt.Sprintf("fingerprint: %s", fp))
+		}
 	}
 
 	if isTrue(opts["tls"]) {
@@ -1113,6 +1196,8 @@ func renderQuantumultXNode(node proxyNode) string {
 		parts = append(parts, "password="+opts["password"])
 	case "ss":
 		parts = append(parts, "method="+opts["encrypt-method"], "password="+opts["password"])
+	case "hysteria2":
+		parts = append(parts, "password="+opts["password"])
 	}
 	if isTrue(opts["tls"]) {
 		parts = append(parts, "over-tls=true")
@@ -1142,6 +1227,8 @@ func quantumultTag(kind string) string {
 		return "trojan"
 	case "ss":
 		return "shadowsocks"
+	case "hysteria2":
+		return "hysteria2"
 	default:
 		return ""
 	}
@@ -1738,6 +1825,25 @@ func renderShadowrocket(nodes []proxyNode, opts requestOptions) string {
 				}
 			}
 			link = fmt.Sprintf("vless://%s@%s:%d?%s#%s", pass, n.Host, n.Port, query.Encode(), url.QueryEscape(n.Name))
+		case "hysteria2":
+			pass := params["password"]
+			query := url.Values{}
+			if sni := params["sni"]; sni != "" {
+				query.Set("sni", sni)
+			}
+			if params["skip-cert-verify"] == "true" {
+				query.Set("insecure", "1")
+			}
+			if obfs := params["obfs"]; obfs != "" {
+				query.Set("obfs", obfs)
+				if obfsPwd := params["obfs-password"]; obfsPwd != "" {
+					query.Set("obfs-password", obfsPwd)
+				}
+			}
+			if fp := params["server-cert-fingerprint-sha256"]; fp != "" {
+				query.Set("pinSHA256", fp)
+			}
+			link = fmt.Sprintf("hysteria2://%s@%s:%d?%s#%s", url.QueryEscape(pass), n.Host, n.Port, query.Encode(), url.QueryEscape(n.Name))
 		}
 
 		if link != "" {

@@ -255,3 +255,175 @@ func TestParseVLessXHTTPRendersClashTransport(t *testing.T) {
 		}
 	}
 }
+
+func TestParseHysteria2Basic(t *testing.T) {
+	t.Parallel()
+
+	link := "hysteria2://mypassword@hy2.example.com:8443/?sni=real.example.com#测试节点"
+	node, err := parseHysteria2(link, requestOptions{AllowUDP: true, SkipCertVerify: false})
+	if err != nil {
+		t.Fatalf("parse hysteria2 link: %v", err)
+	}
+
+	if node.SurgeType != "hysteria2" {
+		t.Fatalf("expected SurgeType=hysteria2, got %s", node.SurgeType)
+	}
+	if node.Host != "hy2.example.com" {
+		t.Fatalf("expected host=hy2.example.com, got %s", node.Host)
+	}
+	if node.Port != 8443 {
+		t.Fatalf("expected port=8443, got %d", node.Port)
+	}
+	if node.Name != "测试节点" {
+		t.Fatalf("expected name=测试节点, got %s", node.Name)
+	}
+
+	opts := parseOptionPairs(node.Options)
+	if opts["password"] != "mypassword" {
+		t.Fatalf("expected password=mypassword, got %s", opts["password"])
+	}
+	if opts["sni"] != "real.example.com" {
+		t.Fatalf("expected sni=real.example.com, got %s", opts["sni"])
+	}
+	if opts["download-bandwidth"] != "10000" {
+		t.Fatalf("expected download-bandwidth=10000, got %s", opts["download-bandwidth"])
+	}
+	if opts["udp-relay"] != "true" {
+		t.Fatalf("expected udp-relay=true, got %s", opts["udp-relay"])
+	}
+}
+
+func TestParseHysteria2WithHy2Prefix(t *testing.T) {
+	t.Parallel()
+
+	link := "hy2://pwd123@node.example.com:443#HY2节点"
+	node, err := parseHysteria2(link, requestOptions{AllowUDP: true, SkipCertVerify: true})
+	if err != nil {
+		t.Fatalf("parse hy2 link: %v", err)
+	}
+
+	if node.SurgeType != "hysteria2" {
+		t.Fatalf("expected SurgeType=hysteria2, got %s", node.SurgeType)
+	}
+	if node.Host != "node.example.com" {
+		t.Fatalf("expected host=node.example.com, got %s", node.Host)
+	}
+
+	opts := parseOptionPairs(node.Options)
+	if opts["password"] != "pwd123" {
+		t.Fatalf("expected password=pwd123, got %s", opts["password"])
+	}
+	if opts["sni"] != "node.example.com" {
+		t.Fatalf("expected sni=node.example.com, got %s", opts["sni"])
+	}
+	if opts["skip-cert-verify"] != "true" {
+		t.Fatalf("expected skip-cert-verify=true, got %s", opts["skip-cert-verify"])
+	}
+}
+
+func TestParseHysteria2WithObfs(t *testing.T) {
+	t.Parallel()
+
+	link := "hysteria2://letmein@example.com:443/?obfs=salamander&obfs-password=gawrgura&insecure=1&pinSHA256=deadbeef&sni=real.example.com#混淆节点"
+	node, err := parseHysteria2(link, requestOptions{AllowUDP: false, SkipCertVerify: false})
+	if err != nil {
+		t.Fatalf("parse hysteria2 obfs link: %v", err)
+	}
+
+	opts := parseOptionPairs(node.Options)
+	if opts["obfs"] != "salamander" {
+		t.Fatalf("expected obfs=salamander, got %s", opts["obfs"])
+	}
+	if opts["obfs-password"] != "gawrgura" {
+		t.Fatalf("expected obfs-password=gawrgura, got %s", opts["obfs-password"])
+	}
+	if opts["server-cert-fingerprint-sha256"] != "deadbeef" {
+		t.Fatalf("expected pinSHA256=deadbeef, got %s", opts["server-cert-fingerprint-sha256"])
+	}
+	if opts["skip-cert-verify"] != "true" {
+		t.Fatalf("expected skip-cert-verify=true (from insecure=1), got %s", opts["skip-cert-verify"])
+	}
+	if _, hasUDP := opts["udp-relay"]; hasUDP {
+		t.Fatalf("expected no udp-relay when AllowUDP=false")
+	}
+}
+
+func TestRenderClashProxyHysteria2(t *testing.T) {
+	t.Parallel()
+
+	node := proxyNode{
+		Name:      "hy2-clash-node",
+		SurgeType: "hysteria2",
+		Host:      "hy2.example.com",
+		Port:      443,
+		Options: []string{
+			"password=testpwd",
+			"download-bandwidth=10000",
+			"sni=cdn.example.com",
+			"skip-cert-verify=true",
+			"obfs=salamander",
+			"obfs-password=secret",
+			"udp-relay=true",
+		},
+	}
+
+	lines := renderClashProxy(node)
+	if len(lines) != 1 {
+		t.Fatalf("unexpected clash proxy line count: %d", len(lines))
+	}
+	got := lines[0]
+
+	for _, want := range []string{
+		"type: hysteria2",
+		"password: testpwd",
+		`down: "10000 Mbps"`,
+		"obfs: salamander",
+		"obfs-password: secret",
+		"servername: cdn.example.com",
+		"skip-cert-verify: true",
+		"udp: true",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("clash hysteria2 line missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderShadowrocketHysteria2(t *testing.T) {
+	t.Parallel()
+
+	node := proxyNode{
+		Name:      "hy2-sr-node",
+		SurgeType: "hysteria2",
+		Host:      "sr.example.com",
+		Port:      8443,
+		Options: []string{
+			"password=srpwd",
+			"download-bandwidth=10000",
+			"sni=sr.example.com",
+			"skip-cert-verify=true",
+			"obfs=salamander",
+			"obfs-password=obfspwd",
+			"server-cert-fingerprint-sha256=aabbccdd",
+		},
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(renderShadowrocket([]proxyNode{node}, requestOptions{}))
+	if err != nil {
+		t.Fatalf("decode shadowrocket payload: %v", err)
+	}
+	got := string(raw)
+
+	for _, want := range []string{
+		"hysteria2://srpwd@sr.example.com:8443?",
+		"sni=sr.example.com",
+		"insecure=1",
+		"obfs=salamander",
+		"obfs-password=obfspwd",
+		"pinSHA256=aabbccdd",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("shadowrocket hysteria2 output missing %q:\n%s", want, got)
+		}
+	}
+}
