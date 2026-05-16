@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -1715,6 +1716,14 @@ func handleShortenAPI(cfg config) http.HandlerFunc {
 		}
 
 		if needWrite {
+			if err := os.MkdirAll(filepath.Dir(cfg.LinksFile), 0755); err != nil {
+				log.Printf("failed to create links directory: %v", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]any{
+					"success": false,
+					"error":   "server error",
+				})
+				return
+			}
 			if err := os.WriteFile(cfg.LinksFile, serializeLinkEntries(entries), 0644); err != nil {
 				log.Printf("failed to write links file %s: %v", cfg.LinksFile, err)
 				writeJSON(w, http.StatusInternalServerError, map[string]any{
