@@ -835,7 +835,8 @@ uninstall_service() {
 
 list_nodes() {
   echo
-  title "已注册的 Snell 节点"
+  echo -e "${CYAN}${BOLD}已注册的 Snell 节点${NC}"
+  divider
   if [[ ! -f "${NODES_FILE}" ]] || [[ ! -s "${NODES_FILE}" ]]; then
     warn "暂无任何已注册的节点。"
   else
