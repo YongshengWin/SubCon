@@ -382,7 +382,7 @@ if [[ -n "${SUBCON_URL}" && -n "${SUBCON_SECRET}" ]]; then
     title "注册到 SubCon"
 
     TIMESTAMP=$(date +%s)
-    BODY="{\"host\":\"${HOST}\",\"port\":${PORT},\"psk\":\"${PSK}\",\"version\":4,\"name\":\"${NODE_NAME}\"}"
+    BODY="{\"host\":\"${HOST}\",\"port\":${PORT},\"psk\":\"${PSK}\",\"version\":5,\"name\":\"${NODE_NAME}\"}"
     SIGNATURE=$(echo -n "${TIMESTAMP}|${BODY}" | openssl dgst -sha256 -hmac "${SUBCON_SECRET}" | awk '{print $NF}')
 
     info "正在向 ${SUBCON_URL} 发送注册请求..."
