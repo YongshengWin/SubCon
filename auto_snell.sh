@@ -306,6 +306,13 @@ read -rp "$(echo -e "${CYAN}请输入节点名称（默认: ${DEFAULT_NAME}）: 
 NODE_NAME="${NODE_NAME:-${DEFAULT_NAME}}"
 info "节点名称: ${BOLD}${NODE_NAME}${NC}"
 
+else
+    # 复用模式：仍允许修改节点名称
+    read -rp "$(echo -e "${CYAN}请输入节点名称（当前: ${NODE_NAME}）: ${NC}")" NEW_NAME
+    if [[ -n "${NEW_NAME}" ]]; then
+        NODE_NAME="${NEW_NAME}"
+    fi
+    info "节点名称: ${BOLD}${NODE_NAME}${NC}"
 fi
 
 # 始终询问 SubCon 注册信息（注册文件不保存密钥）
