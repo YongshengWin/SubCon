@@ -395,6 +395,7 @@ if ! "${SNELL_BIN}" --version >/dev/null 2>&1; then
     # 确保依赖可用
     command -v ar >/dev/null 2>&1 || { apk update && apk add --no-cache binutils; }
     command -v tar >/dev/null 2>&1 || apk add --no-cache tar
+    command -v xz >/dev/null 2>&1 || apk add --no-cache xz
 
     GLIBC_DIR="/opt/glibc"
     GLIBC_LD="${GLIBC_DIR}/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
