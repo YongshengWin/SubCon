@@ -392,17 +392,29 @@ if ! "${SNELL_BIN}" --version >/dev/null 2>&1; then
     warn "snell-server 与当前系统不兼容（glibc vs musl），安装 glibc 运行时"
     USE_GLIBC_LOADER=true
 
+    # 确保依赖可用
+    command -v ar >/dev/null 2>&1 || { apk update && apk add --no-cache binutils; }
+    command -v tar >/dev/null 2>&1 || apk add --no-cache tar
+
     GLIBC_DIR="/opt/glibc"
     GLIBC_LD="${GLIBC_DIR}/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
 
     if [[ ! -f "${GLIBC_LD}" ]]; then
         info "下载 Debian glibc 运行时（~5MB）..."
         mkdir -p "${GLIBC_DIR}"
-        if ! command -v ar &>/dev/null; then
-            apk add --no-cache binutils &>/dev/null
+        # 尝试多个 Debian 镜像源
+        for MIRROR in \
+            "http://ftp.debian.org" \
+            "http://ftp.us.debian.org" \
+            "http://ftp.cn.debian.org" \
+            "http://ftp.jp.debian.org"; do
+            curl -fsSL --connect-timeout 10 -o /tmp/libc6.deb \
+                "${MIRROR}/debian/pool/main/g/glibc/libc6_2.36-9+deb12u14_amd64.deb" && break
+        done
+        if [[ ! -f /tmp/libc6.deb || ! -s /tmp/libc6.deb ]]; then
+            error "下载 glibc 运行时失败，请检查网络"
+            exit 1
         fi
-        curl -fsSL -o /tmp/libc6.deb \
-            "http://ftp.debian.org/debian/pool/main/g/glibc/libc6_2.36-9+deb12u14_amd64.deb"
         ar x /tmp/libc6.deb --output="${GLIBC_DIR}" data.tar.xz
         tar -xf "${GLIBC_DIR}/data.tar.xz" -C "${GLIBC_DIR}"
         rm -f /tmp/libc6.deb "${GLIBC_DIR}/data.tar.xz"
