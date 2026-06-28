@@ -386,11 +386,35 @@ chmod +x "${TEMP_DIR}/snell-server"
 mv "${TEMP_DIR}/snell-server" "${SNELL_BIN}"
 info "Snell 已安装到 ${SNELL_BIN}"
 
-# -------------------- 8.1 检查二进制兼容性 --------------------
-USE_DOCKER=false
+# -------------------- 8.1 Alpine/musl 兼容处理 --------------------
+USE_GLIBC_LOADER=false
 if ! "${SNELL_BIN}" --version >/dev/null 2>&1; then
-    warn "snell-server 二进制与当前系统不兼容（glibc vs musl），将使用 Docker 运行"
-    USE_DOCKER=true
+    warn "snell-server 与当前系统不兼容（glibc vs musl），安装 glibc 运行时"
+    USE_GLIBC_LOADER=true
+
+    GLIBC_DIR="/opt/glibc"
+    GLIBC_LD="${GLIBC_DIR}/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
+
+    if [[ ! -f "${GLIBC_LD}" ]]; then
+        info "下载 Debian glibc 运行时（~5MB）..."
+        mkdir -p "${GLIBC_DIR}"
+        curl -fsSL -o /tmp/libc6.deb \
+            "http://ftp.debian.org/debian/pool/main/g/glibc/libc6_2.36-9+deb12u9_amd64.deb"
+        ar x /tmp/libc6.deb --output="${GLIBC_DIR}" data.tar.xz
+        tar -xf "${GLIBC_DIR}/data.tar.xz" -C "${GLIBC_DIR}"
+        rm -f /tmp/libc6.deb "${GLIBC_DIR}/data.tar.xz"
+    fi
+
+    # 创建 glibc wrapper
+    cat > /usr/local/bin/snell-server-glibc <<'GWRAP'
+#!/bin/sh
+exec /opt/glibc/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 \
+    --library-path /opt/glibc/lib/x86_64-linux-gnu \
+    /usr/local/bin/snell-server "$@"
+GWRAP
+    chmod +x /usr/local/bin/snell-server-glibc
+    SNELL_BIN="/usr/local/bin/snell-server-glibc"
+    info "glibc 运行时安装完成"
 fi
 
 # -------------------- 9. 写入配置文件 --------------------
@@ -429,52 +453,14 @@ EOF
 chmod 600 "${SNELL_CONF_DIR}/.registration_info"
 
 # -------------------- 10. 启动服务 --------------------
-if [[ "${USE_DOCKER}" == "true" ]]; then
-    title "配置 Docker 运行"
-
-    if ! command -v docker &>/dev/null; then
-        info "安装 Docker..."
-        apk add --no-cache docker
-        rc-update add docker boot
-        rc-service docker start
-    fi
-
-    # 下拉 Dockerfile 并构建镜像
-    DOCKER_DIR="${SNELL_CONF_DIR}/docker"
-    mkdir -p "${DOCKER_DIR}"
-    curl -fsSL -o "${DOCKER_DIR}/Dockerfile" \
-        "https://raw.githubusercontent.com/YongshengWin/SubCon/main/snell-docker/Dockerfile"
-
-    info "构建 snell Docker 镜像..."
-    docker build -t snell-server "${DOCKER_DIR}"
-
-    # 停掉旧容器
-    docker rm -f snell-server 2>/dev/null || true
-
-    info "启动 snell 容器..."
-    docker run -d \
-        --name snell-server \
-        --network host \
-        --restart unless-stopped \
-        -v "${SNELL_CONF_FILE}:/etc/snell/snell-server.conf:ro" \
-        snell-server
-
-    sleep 2
-    if docker ps --filter name=snell-server --filter status=running | grep -q snell-server; then
-        info "${GREEN}${BOLD}snell Docker 容器运行正常！${NC}"
+detect_init() {
+    if command -v systemctl &>/dev/null && [[ -d /etc/systemd/system ]]; then
+        echo "systemd"
+    elif [[ -f /etc/alpine-release ]]; then
+        echo "openrc"
+    elif command -v rc-service &>/dev/null; then
+        echo "openrc"
     else
-        error "容器启动失败，检查日志: docker logs snell-server"
-        exit 1
-    fi
-else
-    detect_init() {
-        if command -v systemctl &>/dev/null && [[ -d /etc/systemd/system ]]; then
-            echo "systemd"
-        elif [[ -f /etc/alpine-release ]]; then
-            echo "openrc"
-        elif command -v rc-service &>/dev/null; then
-            echo "openrc"
-        else
         echo "unknown"
     fi
 }
@@ -482,27 +468,15 @@ else
 INIT_SYSTEM=$(detect_init)
 
 if [[ "${INIT_SYSTEM}" == "openrc" ]]; then
-    # snell-server 是 glibc 编译的，Alpine musl 需要兼容层
-    if ! apk info gcompat &>/dev/null 2>&1; then
-        apk add --no-cache gcompat
-    fi
-
     title "配置 OpenRC 服务"
-
-    # Alpine 的 nobody 用户组一般是 nobody，没有 nogroup
-    svc_user="nobody"
-    svc_group="nobody"
-    if ! getent group "${svc_group}" &>/dev/null; then
-        svc_group="${svc_user}"
-    fi
 
     SNELL_SERVICE_FILE="/etc/init.d/snell"
 
-    cat > "${SNELL_SERVICE_FILE}" <<'OPENRC_EOF'
+    cat > "${SNELL_SERVICE_FILE}" <<OPENRC_EOF
 #!/sbin/openrc-run
 name="snell-server"
 description="Snell Proxy Service"
-command="/usr/local/bin/snell-server"
+command="${SNELL_BIN}"
 command_args="-c /etc/snell/snell-server.conf"
 command_user="nobody"
 supervisor="supervise-daemon"
@@ -540,7 +514,7 @@ Type=simple
 User=nobody
 Group=nogroup
 LimitNOFILE=32768
-ExecStart=/usr/local/bin/snell-server -c /etc/snell/snell-server.conf
+ExecStart=${SNELL_BIN} -c /etc/snell/snell-server.conf
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 StandardOutput=syslog
 StandardError=syslog
@@ -554,7 +528,6 @@ EOF
 
     info "服务文件已写入 ${SNELL_SERVICE_FILE}"
 
-    # 启动或重启服务
     systemctl daemon-reload
     if systemctl is-active --quiet snell 2>/dev/null; then
         systemctl restart snell
@@ -573,7 +546,8 @@ EOF
         exit 1
     fi
 fi
-fi
+
+
 
 # -------------------- 11. 自动注册到 SubCon --------------------
 REGISTER_RESULT=""
