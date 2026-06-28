@@ -14,10 +14,10 @@ BOLD='\033[1m'
 NC='\033[0m'  # 恢复默认
 
 # -------------------- 工具函数 --------------------
-info()    { echo -e "${GREEN}[✓]${NC} $*"; }
-warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
-error()   { echo -e "${RED}[✗]${NC} $*"; }
-title()   { echo -e "\n${CYAN}${BOLD}>>> $* <<<${NC}\n"; }
+info()    { echo -e "${GREEN}[✓]${NC} $*" >&2; }
+warn()    { echo -e "${YELLOW}[!]${NC} $*" >&2; }
+error()   { echo -e "${RED}[✗]${NC} $*" >&2; }
+title()   { echo -e "\n${CYAN}${BOLD}>>> $* <<<${NC}\n" >&2; }
 
 # -------------------- 常量 --------------------
 SNELL_CONF_DIR="/etc/snell"
