@@ -404,13 +404,17 @@ EOF
 
 info "服务文件已写入 ${SNELL_SERVICE_FILE}"
 
-# 启动服务
+# 启动或重启服务
 systemctl daemon-reload
-systemctl enable snell
-systemctl start snell
-info "snell 服务已启动"
+if systemctl is-active --quiet snell 2>/dev/null; then
+    systemctl restart snell
+    info "snell 服务已重启"
+else
+    systemctl enable snell
+    systemctl start snell
+    info "snell 服务已启动"
+fi
 
-# 等待 2 秒后验证
 sleep 2
 if systemctl is-active --quiet snell; then
     info "${GREEN}${BOLD}snell 服务运行正常！${NC}"
