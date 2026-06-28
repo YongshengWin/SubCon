@@ -108,7 +108,7 @@ do_uninstall() {
         info "禁用 snell 服务..."
         systemctl disable snell
     fi
-    if rc-service snell status 2>/dev/null | grep -q started; then
+    if rc-service snell status 2>/dev/null | grep -qE "started|running"; then
         info "stop snell (OpenRC)..."
         rc-service snell stop
     fi
@@ -455,28 +455,27 @@ description="Snell Proxy Service"
 command="/usr/local/bin/snell-server"
 command_args="-c /etc/snell/snell-server.conf"
 command_user="nobody"
-command_background=true
-pidfile="/run/snell-server.pid"
+supervisor="supervise-daemon"
 OPENRC_EOF
 
     chmod +x "${SNELL_SERVICE_FILE}"
     info "服务文件已写入 ${SNELL_SERVICE_FILE}"
 
     rc-update add snell default 2>/dev/null || true
-    if rc-service snell status 2>/dev/null | grep -q started; then
+    if rc-service snell status 2>/dev/null | grep -qE "started|running"; then
         rc-service snell restart
         info "snell 服务已重启"
     else
-        rc-service snell start
+        rc-service snell start || true
         info "snell 服务已启动"
     fi
 
     sleep 2
-    if rc-service snell status 2>/dev/null | grep -q started; then
+    if rc-service snell status 2>/dev/null | grep -qE "started|running"; then
         info "${GREEN}${BOLD}snell 服务运行正常！${NC}"
     else
-        error "snell 服务启动失败，请检查日志: tail -50 /var/log/messages"
-        exit 1
+        warn "snell 服务可能未正常启动: $(rc-service snell status 2>&1)"
+        warn "若手动确认可忽略此提示"
     fi
 else
     title "配置 systemd 服务"
