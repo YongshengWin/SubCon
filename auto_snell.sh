@@ -386,6 +386,13 @@ chmod +x "${TEMP_DIR}/snell-server"
 mv "${TEMP_DIR}/snell-server" "${SNELL_BIN}"
 info "Snell 已安装到 ${SNELL_BIN}"
 
+# -------------------- 8.1 检查二进制兼容性 --------------------
+USE_DOCKER=false
+if ! "${SNELL_BIN}" --version >/dev/null 2>&1; then
+    warn "snell-server 二进制与当前系统不兼容（glibc vs musl），将使用 Docker 运行"
+    USE_DOCKER=true
+fi
+
 # -------------------- 9. 写入配置文件 --------------------
 title "配置 Snell"
 
@@ -421,15 +428,53 @@ port=${PORT}
 EOF
 chmod 600 "${SNELL_CONF_DIR}/.registration_info"
 
-# -------------------- 10. 创建服务（systemd / OpenRC） --------------------
-detect_init() {
-    if command -v systemctl &>/dev/null && [[ -d /etc/systemd/system ]]; then
-        echo "systemd"
-    elif [[ -f /etc/alpine-release ]]; then
-        echo "openrc"
-    elif command -v rc-service &>/dev/null; then
-        echo "openrc"
+# -------------------- 10. 启动服务 --------------------
+if [[ "${USE_DOCKER}" == "true" ]]; then
+    title "配置 Docker 运行"
+
+    if ! command -v docker &>/dev/null; then
+        info "安装 Docker..."
+        apk add --no-cache docker
+        rc-update add docker boot
+        rc-service docker start
+    fi
+
+    # 下拉 Dockerfile 并构建镜像
+    DOCKER_DIR="${SNELL_CONF_DIR}/docker"
+    mkdir -p "${DOCKER_DIR}"
+    curl -fsSL -o "${DOCKER_DIR}/Dockerfile" \
+        "https://raw.githubusercontent.com/YongshengWin/SubCon/main/snell-docker/Dockerfile"
+
+    info "构建 snell Docker 镜像..."
+    docker build -t snell-server "${DOCKER_DIR}"
+
+    # 停掉旧容器
+    docker rm -f snell-server 2>/dev/null || true
+
+    info "启动 snell 容器..."
+    docker run -d \
+        --name snell-server \
+        --network host \
+        --restart unless-stopped \
+        -v "${SNELL_CONF_FILE}:/etc/snell/snell-server.conf:ro" \
+        snell-server
+
+    sleep 2
+    if docker ps --filter name=snell-server --filter status=running | grep -q snell-server; then
+        info "${GREEN}${BOLD}snell Docker 容器运行正常！${NC}"
     else
+        error "容器启动失败，检查日志: docker logs snell-server"
+        exit 1
+    fi
+else
+    detect_init() {
+        if command -v systemctl &>/dev/null && [[ -d /etc/systemd/system ]]; then
+            echo "systemd"
+        elif [[ -f /etc/alpine-release ]]; then
+            echo "openrc"
+        elif command -v rc-service &>/dev/null; then
+            echo "openrc"
+        else
         echo "unknown"
     fi
 }
@@ -527,6 +572,7 @@ EOF
         error "snell 服务启动失败，请检查日志: journalctl -u snell -n 20"
         exit 1
     fi
+fi
 fi
 
 # -------------------- 11. 自动注册到 SubCon --------------------
