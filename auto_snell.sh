@@ -186,8 +186,6 @@ get_snell_version() {
     else
         warn "无法从官方页面获取版本号，使用回退版本 ${SNELL_FALLBACK_VERSION}"
         echo "${SNELL_FALLBACK_VERSION}"
-        export SNELL_VERSION_PAGE="https://manual.nssurge.com/others/snell.html"
-        warn "已清除 DNS 解析缓存。"
     fi
 }
 
