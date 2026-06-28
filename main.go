@@ -1,15 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -49,6 +53,8 @@ type config struct {
 	CertFile     string
 	KeyFile      string
 	LinksFile    string
+	NodesFile    string
+	NodeSecret   string
 }
 
 type proxyNode struct {
@@ -110,6 +116,34 @@ type converterCache struct {
 
 var resultCache = converterCache{items: map[string]cacheEntry{}}
 
+var nodesFileMu sync.Mutex
+
+type rateLimiter struct {
+	mu      sync.Mutex
+	clients map[string][]time.Time
+}
+
+var nodeRateLimiter = &rateLimiter{clients: map[string][]time.Time{}}
+
+func (rl *rateLimiter) Allow(ip string, maxRequests int, window time.Duration) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	now := time.Now()
+	cutoff := now.Add(-window)
+	var recent []time.Time
+	for _, t := range rl.clients[ip] {
+		if t.After(cutoff) {
+			recent = append(recent, t)
+		}
+	}
+	if len(recent) >= maxRequests {
+		rl.clients[ip] = recent
+		return false
+	}
+	rl.clients[ip] = append(recent, now)
+	return true
+}
+
 func main() {
 	cfg := loadConfig()
 
@@ -120,6 +154,7 @@ func main() {
 	mux.HandleFunc("/api/convert", handleConvert(cfg, true))
 	mux.HandleFunc("/api/shorten", handleShortenAPI(cfg))
 	mux.HandleFunc("/s/", handleShortLink(cfg))
+	mux.HandleFunc("/api/node", handleNodeAPI(cfg))
 
 	addr := cfg.Listen + ":" + cfg.Port
 	server := &http.Server{
@@ -146,6 +181,8 @@ func loadConfig() config {
 		CertFile:     getenv("SSC_CERT_FILE", ""),
 		KeyFile:      getenv("SSC_KEY_FILE", ""),
 		LinksFile:    getenv("SSC_LINKS_FILE", "/opt/surge-sub-converter/data/subscriptions.txt"),
+		NodesFile:    getenv("SSC_NODES_FILE", "/opt/surge-sub-converter/data/snell_nodes.txt"),
+		NodeSecret:   getenv("SSC_NODE_SECRET", ""),
 	}
 	if raw := os.Getenv("SSC_FETCH_TIMEOUT"); raw != "" {
 		if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
@@ -341,6 +378,17 @@ func convertSubscription(ctx context.Context, cfg config, subURL string, opts re
 		}(u)
 	}
 	wg.Wait()
+
+	// 合并本地注册的 Snell 节点
+	if cfg.NodesFile != "" {
+		if data, err := os.ReadFile(cfg.NodesFile); err == nil {
+			localLinks := splitLinks(string(data))
+			if len(localLinks) > 0 {
+				log.Printf("Loaded %d local snell nodes from %s", len(localLinks), cfg.NodesFile)
+				allLinks = append(allLinks, localLinks...)
+			}
+		}
+	}
 
 	if len(allLinks) == 0 {
 		return "", nil, 0, errors.New("no nodes found in any of the subscriptions")
@@ -564,6 +612,8 @@ func parseProxy(link string, opts requestOptions) (proxyNode, error) {
 		return parseShadowsocks(link, opts)
 	case strings.HasPrefix(link, "hysteria2://"), strings.HasPrefix(link, "hy2://"):
 		return parseHysteria2(link, opts)
+	case strings.HasPrefix(link, "snell://"):
+		return parseSnell(link, opts)
 	default:
 		return proxyNode{}, errors.New("unsupported link type")
 	}
@@ -830,6 +880,56 @@ func parseHysteria2(link string, opts requestOptions) (proxyNode, error) {
 	return proxyNode{
 		Name:      sanitizeName(name),
 		SurgeType: "hysteria2",
+		Host:      parsed.Hostname(),
+		Port:      port,
+		Options:   options,
+	}, nil
+}
+
+func parseSnell(link string, opts requestOptions) (proxyNode, error) {
+	parsed, err := url.Parse(link)
+	if err != nil {
+		return proxyNode{}, fmt.Errorf("invalid snell link: %w", err)
+	}
+
+	port, err := normalizePort(parsed.Port(), 0)
+	if err != nil {
+		return proxyNode{}, err
+	}
+	if port == 0 {
+		return proxyNode{}, errors.New("snell link missing port")
+	}
+
+	psk := ""
+	if parsed.User != nil {
+		psk = parsed.User.Username()
+	}
+	if psk == "" {
+		return proxyNode{}, errors.New("snell link missing psk")
+	}
+
+	query := parsed.Query()
+	version := query.Get("version")
+	if version == "" {
+		version = "4"
+	}
+
+	options := []string{
+		"psk=" + psk,
+		"version=" + version,
+	}
+
+	if obfs := query.Get("obfs"); obfs != "" {
+		options = append(options, "obfs="+obfs)
+		if obfsHost := query.Get("obfs-host"); obfsHost != "" {
+			options = append(options, "obfs-host="+obfsHost)
+		}
+	}
+
+	name := fragmentOrHost(parsed)
+	return proxyNode{
+		Name:      sanitizeName(name),
+		SurgeType: "snell",
 		Host:      parsed.Hostname(),
 		Port:      port,
 		Options:   options,
@@ -1119,6 +1219,18 @@ func renderClashProxy(node proxyNode) []string {
 		if fp := opts["server-cert-fingerprint-sha256"]; fp != "" {
 			parts = append(parts, fmt.Sprintf("fingerprint: %s", fp))
 		}
+	case "snell":
+		parts = append(parts, fmt.Sprintf("psk: %s", yamlString(opts["psk"])))
+		if ver := opts["version"]; ver != "" {
+			parts = append(parts, fmt.Sprintf("version: %s", ver))
+		}
+		if obfs := opts["obfs"]; obfs != "" {
+			obfsParts := []string{fmt.Sprintf("mode: %s", obfs)}
+			if host := opts["obfs-host"]; host != "" {
+				obfsParts = append(obfsParts, fmt.Sprintf("host: %s", yamlString(host)))
+			}
+			parts = append(parts, fmt.Sprintf("obfs-opts: { %s }", strings.Join(obfsParts, ", ")))
+		}
 	}
 
 	if isTrue(opts["tls"]) {
@@ -1230,6 +1342,8 @@ func quantumultTag(kind string) string {
 		return "shadowsocks"
 	case "hysteria2":
 		return "hysteria2"
+	case "snell":
+		return "" // Quantumult X 不支持 Snell
 	default:
 		return ""
 	}
@@ -1853,6 +1967,18 @@ func renderShadowrocket(nodes []proxyNode, opts requestOptions) string {
 				query.Set("pinSHA256", fp)
 			}
 			link = fmt.Sprintf("hysteria2://%s@%s:%d?%s#%s", url.QueryEscape(pass), n.Host, n.Port, query.Encode(), url.QueryEscape(n.Name))
+		case "snell":
+			psk := params["psk"]
+			ver := firstOrDefault(params["version"], "4")
+			query := url.Values{}
+			query.Set("version", ver)
+			if obfs := params["obfs"]; obfs != "" {
+				query.Set("obfs", obfs)
+				if host := params["obfs-host"]; host != "" {
+					query.Set("obfs-host", host)
+				}
+			}
+			link = fmt.Sprintf("snell://%s@%s:%d?%s#%s", url.QueryEscape(psk), n.Host, n.Port, query.Encode(), url.QueryEscape(n.Name))
 		}
 
 		if link != "" {
@@ -1862,3 +1988,206 @@ func renderShadowrocket(nodes []proxyNode, opts requestOptions) string {
 
 	return base64.StdEncoding.EncodeToString([]byte(strings.Join(links, "\n")))
 }
+
+// ========== 节点自动注册 API ==========
+
+type registerNodeRequest struct {
+	Host    string `json:"host"`
+	Port    int    `json:"port"`
+	PSK     string `json:"psk"`
+	Version int    `json:"version"`
+	Name    string `json:"name"`
+}
+
+func handleNodeAPI(cfg config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if cfg.NodeSecret == "" {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"success": false,
+				"error":   "node registration is not configured",
+			})
+			return
+		}
+
+		// 速率限制
+		clientIP := r.RemoteAddr
+		if idx := strings.LastIndex(clientIP, ":"); idx >= 0 {
+			clientIP = clientIP[:idx]
+		}
+		if !nodeRateLimiter.Allow(clientIP, 5, time.Minute) {
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{
+				"success": false,
+				"error":   "rate limit exceeded",
+			})
+			return
+		}
+
+		switch r.Method {
+		case http.MethodPost:
+			handleRegisterNode(cfg, w, r)
+		case http.MethodDelete:
+			handleDeleteNode(cfg, w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	}
+}
+
+func handleRegisterNode(cfg config, w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "failed to read body"})
+		return
+	}
+
+	if !verifyHMAC(r.Header, body, cfg.NodeSecret) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"success": false, "error": "invalid signature"})
+		return
+	}
+
+	var req registerNodeRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "invalid request body"})
+		return
+	}
+
+	if req.Host == "" || req.Port <= 0 || req.Port > 65535 || req.PSK == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "missing required fields (host, port, psk)"})
+		return
+	}
+	if req.Version <= 0 {
+		req.Version = 4
+	}
+	if req.Name == "" {
+		req.Name = req.Host
+	}
+
+	snellURI := fmt.Sprintf("snell://%s@%s:%d?version=%d#%s",
+		url.QueryEscape(req.PSK), req.Host, req.Port, req.Version, url.QueryEscape(req.Name))
+
+	nodesFileMu.Lock()
+	defer nodesFileMu.Unlock()
+
+	data, _ := os.ReadFile(cfg.NodesFile)
+	lines := splitLines(string(data))
+
+	updated := false
+	for i, line := range lines {
+		if parsed, err := url.Parse(line); err == nil && parsed.Hostname() == req.Host {
+			lines[i] = snellURI
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		lines = append(lines, snellURI)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(cfg.NodesFile), 0755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"success": false, "error": "server error"})
+		return
+	}
+	if err := os.WriteFile(cfg.NodesFile, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"success": false, "error": "server error"})
+		return
+	}
+
+	// 清除缓存
+	resultCache.mu.Lock()
+	resultCache.items = map[string]cacheEntry{}
+	resultCache.mu.Unlock()
+
+	action := "registered"
+	if updated {
+		action = "updated"
+	}
+	log.Printf("[NODE] %s node: %s (%s:%d)", action, req.Name, req.Host, req.Port)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"action":  action,
+		"node":    snellURI,
+	})
+}
+
+func handleDeleteNode(cfg config, w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "failed to read body"})
+		return
+	}
+
+	if !verifyHMAC(r.Header, body, cfg.NodeSecret) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"success": false, "error": "invalid signature"})
+		return
+	}
+
+	var req struct {
+		Host string `json:"host"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil || req.Host == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "missing host"})
+		return
+	}
+
+	nodesFileMu.Lock()
+	defer nodesFileMu.Unlock()
+
+	data, _ := os.ReadFile(cfg.NodesFile)
+	lines := splitLines(string(data))
+
+	found := false
+	var remaining []string
+	for _, line := range lines {
+		if parsed, err := url.Parse(line); err == nil && parsed.Hostname() == req.Host {
+			found = true
+			continue
+		}
+		remaining = append(remaining, line)
+	}
+
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]any{"success": false, "error": "node not found"})
+		return
+	}
+
+	content := ""
+	if len(remaining) > 0 {
+		content = strings.Join(remaining, "\n") + "\n"
+	}
+	os.WriteFile(cfg.NodesFile, []byte(content), 0644)
+
+	// 清除缓存
+	resultCache.mu.Lock()
+	resultCache.items = map[string]cacheEntry{}
+	resultCache.mu.Unlock()
+
+	log.Printf("[NODE] deleted node: %s", req.Host)
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "deleted": req.Host})
+}
+
+func verifyHMAC(header http.Header, body []byte, secret string) bool {
+	timestamp := header.Get("X-Timestamp")
+	signature := header.Get("X-Signature")
+	if timestamp == "" || signature == "" {
+		return false
+	}
+
+	ts, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil {
+		return false
+	}
+	now := time.Now().Unix()
+	if math.Abs(float64(now-ts)) > 300 {
+		return false
+	}
+
+	message := timestamp + "|" + string(body)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(message))
+	expected := fmt.Sprintf("%x", mac.Sum(nil))
+
+	return hmac.Equal([]byte(expected), []byte(signature))
+}
+
+// 确保 bytes 包被使用
+var _ = bytes.Compare
