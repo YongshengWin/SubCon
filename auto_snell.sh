@@ -277,10 +277,11 @@ NODE_NAME="${NODE_NAME:-${DEFAULT_NAME}}"
 info "节点名称: ${BOLD}${NODE_NAME}${NC}"
 
 # SubCon 注册地址
-read -rp "$(echo -e "${CYAN}请输入 SubCon 服务地址（如 https://dmit.115emby.top:8443），留空跳过自动注册: ${NC}")" SUBCON_URL
+read -rp "$(echo -e "${CYAN}请输入 SubCon 服务地址（直接回车默认: http://dmit.115emby.top:8090，输入 skip 跳过注册）: ${NC}")" SUBCON_URL
+SUBCON_URL="${SUBCON_URL:-http://dmit.115emby.top:8090}"
 
 SUBCON_SECRET=""
-if [[ -n "${SUBCON_URL}" ]]; then
+if [[ "${SUBCON_URL}" != "skip" ]]; then
     # 去除末尾斜杠
     SUBCON_URL="${SUBCON_URL%/}"
     read -rp "$(echo -e "${CYAN}请输入注册密钥 (SSC_NODE_SECRET): ${NC}")" SUBCON_SECRET
