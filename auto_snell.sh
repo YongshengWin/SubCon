@@ -238,7 +238,13 @@ fi
 if [[ -f "${SNELL_CONF_DIR}/.registration_info" ]]; then
     EXISTING_HOST=$(grep -oP '^host=\K.*' "${SNELL_CONF_DIR}/.registration_info" 2>/dev/null || true)
     EXISTING_NAME=$(grep -oP '^name=\K.*' "${SNELL_CONF_DIR}/.registration_info" 2>/dev/null || true)
+    NODE_ID=$(grep -oP '^node_id=\K.*' "${SNELL_CONF_DIR}/.registration_info" 2>/dev/null || true)
     info "检测到已有注册信息: Host=${EXISTING_HOST:-?}, 名称=${EXISTING_NAME:-?}"
+fi
+
+# 首次安装生成持久 node_id，后续复用
+if [[ -z "${NODE_ID}" ]]; then
+    NODE_ID=$(head -c 16 /dev/urandom | xxd -p)
 fi
 
 if [[ -n "${EXISTING_PORT}" && -n "${EXISTING_PSK}" && -n "${EXISTING_HOST}" && -n "${EXISTING_NAME}" ]]; then
@@ -441,6 +447,7 @@ cat > "${SNELL_CONF_DIR}/.registration_info" <<EOF
 host=${HOST}
 name=${NODE_NAME}
 port=${PORT}
+node_id=${NODE_ID}
 EOF
 chmod 600 "${SNELL_CONF_DIR}/.registration_info"
 
@@ -548,7 +555,7 @@ if [[ -n "${SUBCON_URL}" && -n "${SUBCON_SECRET}" ]]; then
     title "注册到 SubCon"
 
     TIMESTAMP=$(date +%s)
-    BODY="{\"host\":\"${HOST}\",\"port\":${PORT},\"psk\":\"${PSK}\",\"version\":4,\"name\":\"${NODE_NAME}\"}"
+    BODY="{\"host\":\"${HOST}\",\"port\":${PORT},\"psk\":\"${PSK}\",\"version\":4,\"name\":\"${NODE_NAME}\",\"node_id\":\"${NODE_ID}\"}"
     SIGNATURE=$(echo -n "${TIMESTAMP}|${BODY}" | openssl dgst -sha256 -hmac "${SUBCON_SECRET}" | awk '{print $NF}')
 
     info "正在向 ${SUBCON_URL} 发送注册请求..."

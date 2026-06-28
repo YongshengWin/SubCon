@@ -2004,6 +2004,7 @@ type registerNodeRequest struct {
 	PSK     string `json:"psk"`
 	Version int    `json:"version"`
 	Name    string `json:"name"`
+	NodeID  string `json:"node_id"`
 }
 
 func handleNodeAPI(cfg config) http.HandlerFunc {
@@ -2071,6 +2072,11 @@ func handleRegisterNode(cfg config, w http.ResponseWriter, r *http.Request) {
 
 	snellURI := fmt.Sprintf("snell://%s@%s:%d?version=%d#%s",
 		url.QueryEscape(req.PSK), req.Host, req.Port, req.Version, url.QueryEscape(req.Name))
+	// 内嵌 node_id 到 fragment 以便持久追踪
+	if req.NodeID != "" {
+		snellURI = fmt.Sprintf("snell://%s@%s:%d?version=%d&node_id=%s#%s",
+			url.QueryEscape(req.PSK), req.Host, req.Port, req.Version, req.NodeID, url.QueryEscape(req.Name))
+	}
 
 	nodesFileMu.Lock()
 	defer nodesFileMu.Unlock()
@@ -2078,18 +2084,28 @@ func handleRegisterNode(cfg config, w http.ResponseWriter, r *http.Request) {
 	data, _ := os.ReadFile(cfg.NodesFile)
 	lines := splitLines(string(data))
 
-		updated := false
-		for i, line := range lines {
-			if parsed, err := url.Parse(line); err == nil && parsed.Hostname() == req.Host {
-				port, _ := normalizePort(parsed.Port(), 0)
-				if port != req.Port {
-					continue
-				}
+	updated := false
+	for i, line := range lines {
+		parsed, err := url.Parse(line)
+		if err != nil {
+			continue
+		}
+		// 优先按 node_id 匹配
+		if req.NodeID != "" && parsed.Query().Get("node_id") == req.NodeID {
+			lines[i] = snellURI
+			updated = true
+			break
+		}
+		// 回退按 hostname+port 匹配
+		if parsed.Hostname() == req.Host {
+			port, _ := normalizePort(parsed.Port(), 0)
+			if port == req.Port {
 				lines[i] = snellURI
 				updated = true
 				break
 			}
 		}
+	}
 	if !updated {
 		lines = append(lines, snellURI)
 	}
