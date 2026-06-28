@@ -186,6 +186,8 @@ get_snell_version() {
     else
         warn "无法从官方页面获取版本号，使用回退版本 ${SNELL_FALLBACK_VERSION}"
         echo "${SNELL_FALLBACK_VERSION}"
+        export SNELL_VERSION_PAGE="https://manual.nssurge.com/others/snell.html"
+        warn "已清除 DNS 解析缓存。"
     fi
 }
 
@@ -316,6 +318,17 @@ title "配置 Snell"
 
 mkdir -p "${SNELL_CONF_DIR}"
 
+open_port() {
+    local p=$1
+    info "正在尝试开放防火墙端口 ${p}..."
+    iptables -I INPUT -p tcp --dport ${p} -j ACCEPT 2>/dev/null || true
+    iptables -I INPUT -p udp --dport ${p} -j ACCEPT 2>/dev/null || true
+    firewall-cmd --add-port=${p}/tcp --permanent 2>/dev/null || true
+    firewall-cmd --add-port=${p}/udp --permanent 2>/dev/null || true
+    firewall-cmd --reload 2>/dev/null || true
+    ufw allow ${p} 2>/dev/null || true
+}
+
 cat > "${SNELL_CONF_FILE}" <<EOF
 [snell-server]
 listen = 0.0.0.0:${PORT}
@@ -323,7 +336,9 @@ psk = ${PSK}
 ipv6 = false
 EOF
 
-info "配置文件已写入 ${SNELL_CONF_FILE}"
+open_port "${PORT}"
+
+info "配置已生成：${SNELL_CONF_FILE}"
 
 # 保存注册信息（用于卸载时注销节点）
 cat > "${SNELL_CONF_DIR}/.registration_info" <<EOF
