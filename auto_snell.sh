@@ -228,6 +228,7 @@ EXISTING_PORT=""
 EXISTING_PSK=""
 EXISTING_HOST=""
 EXISTING_NAME=""
+NODE_ID=""
 
 if [[ -f "${SNELL_CONF_FILE}" ]]; then
     EXISTING_PORT=$(grep -oP 'listen\s*=\s*[\d.]*:\K\d+' "${SNELL_CONF_FILE}" 2>/dev/null || true)
@@ -244,7 +245,7 @@ fi
 
 # 首次安装生成持久 node_id，后续复用
 if [[ -z "${NODE_ID}" ]]; then
-    NODE_ID=$(head -c 16 /dev/urandom | xxd -p)
+    NODE_ID=$(openssl rand -hex 16)
 fi
 
 if [[ -n "${EXISTING_PORT}" && -n "${EXISTING_PSK}" && -n "${EXISTING_HOST}" && -n "${EXISTING_NAME}" ]]; then
