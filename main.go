@@ -909,9 +909,9 @@ func parseSnell(link string, opts requestOptions) (proxyNode, error) {
 	}
 
 	query := parsed.Query()
-	version := "5"
+	version := query.Get("version")
 	if version == "" {
-		version = "4"
+		version = "5"
 	}
 
 	options := []string{
@@ -1969,7 +1969,7 @@ func renderShadowrocket(nodes []proxyNode, opts requestOptions) string {
 			link = fmt.Sprintf("hysteria2://%s@%s:%d?%s#%s", url.QueryEscape(pass), n.Host, n.Port, query.Encode(), url.QueryEscape(n.Name))
 		case "snell":
 			psk := params["psk"]
-			ver := firstOrDefault(params["version"], "4")
+			ver := firstOrDefault(params["version"], "5")
 			query := url.Values{}
 			query.Set("version", ver)
 			if obfs := params["obfs"]; obfs != "" {
@@ -2056,7 +2056,7 @@ func handleRegisterNode(cfg config, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Version <= 0 {
-		req.Version = 4
+		req.Version = 5
 	}
 	if req.Name == "" {
 		req.Name = req.Host
