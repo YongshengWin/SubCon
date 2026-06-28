@@ -175,7 +175,18 @@ info "检测到 CPU 架构: ${BOLD}${ARCH}${NC}"
 
 # -------------------- 2. 获取最新 Snell v5 版本号 --------------------
 get_snell_version() {
-    echo "v4.0.1"
+    info "正在从官方页面获取最新 Snell v5 版本号..."
+    local version
+    version=$(curl -sL --connect-timeout 10 --max-time 15 "${SNELL_VERSION_PAGE}" \
+        | grep -oP 'snell-server-v\K5\.[0-9]+\.[0-9]+[a-z0-9]*' \
+        | head -1 || true)
+
+    if [[ -n "${version}" ]]; then
+        echo "v${version}"
+    else
+        warn "无法从官方页面获取版本号，使用回退版本 ${SNELL_FALLBACK_VERSION}"
+        echo "${SNELL_FALLBACK_VERSION}"
+    fi
 }
 
 SNELL_VERSION=$(get_snell_version)
