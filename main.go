@@ -910,7 +910,8 @@ func parseSnell(link string, opts requestOptions) (proxyNode, error) {
 
 	query := parsed.Query()
 	version := query.Get("version")
-	if version == "" {
+	if version == "" || version == "5" {
+		// Surge 官方文档明确指出 v4 和 v5 客户端配置一致，统一使用 version=4
 		version = "4"
 	}
 
