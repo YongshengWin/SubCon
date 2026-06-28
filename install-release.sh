@@ -177,6 +177,7 @@ INSTALL_DIR="/opt/${APP_NAME}"
 CONFIG_DIR="${INSTALL_DIR}/data"
 ENV_FILE="${INSTALL_DIR}/sub.env"
 LINKS_FILE="${CONFIG_DIR}/subscriptions.txt"
+NODES_FILE="${CONFIG_DIR}/snell_nodes.txt"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 REMOTE_INSTALL_URL=""
 REMOTE_UNINSTALL_URL=""
@@ -829,6 +830,17 @@ uninstall_service() {
   curl -fsSL "${REMOTE_UNINSTALL_URL}" | bash
 }
 
+list_nodes() {
+  echo
+  title "已注册的 Snell 节点"
+  if [[ ! -f "${NODES_FILE}" ]] || [[ ! -s "${NODES_FILE}" ]]; then
+    warn "暂无任何已注册的节点。"
+  else
+    cat "${NODES_FILE}"
+  fi
+  echo
+}
+
 menu() {
   show_header
 
@@ -848,6 +860,9 @@ menu() {
   printf "   ${BOLD}9.${NC}  HTTPS / 域名设置\n"
   printf "   ${BOLD}10.${NC} 绑定公网 IP\n"
   echo
+  printf "  ${DIM}── 节点管理 ─────────────────────────${NC}\n"
+  printf "   ${BOLD}11.${NC} 查看已注册节点\n"
+  echo
   printf "   ${BOLD}0.${NC}  退出\n"
   echo
   read -r -p "$(printf "${CYAN}请输入数字: ${NC}")" choice
@@ -862,6 +877,7 @@ menu() {
     8) update_link ;;
     9) https_menu ;;
     10) bind_public_ip ;;
+    11) list_nodes ;;
     0) exit 0 ;;
     *) menu ;;
   esac
@@ -879,6 +895,7 @@ if [[ $# -gt 0 ]]; then
     8|update-link|edit|change-source) update_link ;;
     9|domain|https|port|ssl|cert|proxy|tls|native-https) https_menu ;;
     10|bind-ip|ip) bind_public_ip ;;
+    11|nodes|list-nodes) list_nodes ;;
     *) menu ;;
   esac
 else
