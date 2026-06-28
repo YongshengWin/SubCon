@@ -239,7 +239,17 @@ else
     SKIP_INTERACTIVE=false
 fi
 
-# -------------------- 5. 智能端口分配 --------------------
+# -------------------- 5. 获取服务器公网 IP --------------------
+get_public_ip() {
+    local ip
+    ip=$(curl -s --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null \
+        || curl -s --connect-timeout 5 --max-time 10 https://ifconfig.me 2>/dev/null \
+        || curl -s --connect-timeout 5 --max-time 10 https://icanhazip.com 2>/dev/null \
+        || echo "")
+    echo "${ip}"
+}
+
+# -------------------- 6. 智能端口分配 --------------------
 if [[ "${SKIP_INTERACTIVE}" != "true" ]]; then
 generate_port() {
     local port
@@ -263,16 +273,6 @@ info "分配端口: ${BOLD}${PORT}${NC}"
 # -------------------- 5. 生成 PSK 密码 --------------------
 PSK=$(openssl rand -base64 16 | tr -d '=+/' | head -c 16)
 info "已生成 PSK 密码"
-
-# -------------------- 6. 获取服务器公网 IP --------------------
-get_public_ip() {
-    local ip
-    ip=$(curl -s --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null \
-        || curl -s --connect-timeout 5 --max-time 10 https://ifconfig.me 2>/dev/null \
-        || curl -s --connect-timeout 5 --max-time 10 https://icanhazip.com 2>/dev/null \
-        || echo "")
-    echo "${ip}"
-}
 
 PUBLIC_IP=$(get_public_ip)
 if [[ -n "${PUBLIC_IP}" ]]; then
@@ -307,7 +307,31 @@ NODE_NAME="${NODE_NAME:-${DEFAULT_NAME}}"
 info "节点名称: ${BOLD}${NODE_NAME}${NC}"
 
 else
-    # 复用模式：仍允许修改节点名称
+    # 复用模式：允许修改 host 和节点名称
+    title "节点配置（已有配置将被复用）"
+
+    current_domain=""
+    if [[ "${EXISTING_HOST}" == *"${DOMAIN_SUFFIX}"* ]]; then
+        current_domain="${EXISTING_HOST%%.${DOMAIN_SUFFIX}}"
+    fi
+
+    if [[ -n "${current_domain}" ]]; then
+        read -rp "$(echo -e "${CYAN}请输入域名前缀（当前: ${current_domain}，回车保持不变，输入 skip 使用公网 IP）: ${NC}")" NEW_PREFIX
+    else
+        read -rp "$(echo -e "${CYAN}请输入域名前缀（当前为 IP: ${EXISTING_HOST}，输入前缀将拼接为 xxx.${DOMAIN_SUFFIX}，回车保持不变）: ${NC}")" NEW_PREFIX
+    fi
+
+    if [[ -n "${NEW_PREFIX}" && "${NEW_PREFIX}" != "skip" ]]; then
+        HOST="${NEW_PREFIX}.${DOMAIN_SUFFIX}"
+        info "Host 已更新: ${BOLD}${HOST}${NC}"
+    elif [[ "${NEW_PREFIX}" == "skip" ]]; then
+        PUBLIC_IP=$(get_public_ip)
+        HOST="${PUBLIC_IP}"
+        info "Host 已更新为公网 IP: ${BOLD}${HOST}${NC}"
+    else
+        info "Host: ${BOLD}${HOST}${NC}"
+    fi
+
     read -rp "$(echo -e "${CYAN}请输入节点名称（当前: ${NODE_NAME}）: ${NC}")" NEW_NAME
     if [[ -n "${NEW_NAME}" ]]; then
         NODE_NAME="${NEW_NAME}"

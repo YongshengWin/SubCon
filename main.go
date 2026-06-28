@@ -2078,14 +2078,18 @@ func handleRegisterNode(cfg config, w http.ResponseWriter, r *http.Request) {
 	data, _ := os.ReadFile(cfg.NodesFile)
 	lines := splitLines(string(data))
 
-	updated := false
-	for i, line := range lines {
-		if parsed, err := url.Parse(line); err == nil && parsed.Hostname() == req.Host {
-			lines[i] = snellURI
-			updated = true
-			break
+		updated := false
+		for i, line := range lines {
+			if parsed, err := url.Parse(line); err == nil && parsed.Hostname() == req.Host {
+				port, _ := normalizePort(parsed.Port(), 0)
+				if port != req.Port {
+					continue
+				}
+				lines[i] = snellURI
+				updated = true
+				break
+			}
 		}
-	}
 	if !updated {
 		lines = append(lines, snellURI)
 	}
