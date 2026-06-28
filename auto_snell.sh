@@ -426,7 +426,7 @@ if [[ -n "${SUBCON_URL}" && -n "${SUBCON_SECRET}" ]]; then
     title "注册到 SubCon"
 
     TIMESTAMP=$(date +%s)
-    BODY="{\"host\":\"${HOST}\",\"port\":${PORT},\"psk\":\"${PSK}\",\"version\":5,\"name\":\"${NODE_NAME}\"}"
+    BODY="{\"host\":\"${HOST}\",\"port\":${PORT},\"psk\":\"${PSK}\",\"version\":4,\"name\":\"${NODE_NAME}\"}"
     SIGNATURE=$(echo -n "${TIMESTAMP}|${BODY}" | openssl dgst -sha256 -hmac "${SUBCON_SECRET}" | awk '{print $NF}')
 
     info "正在向 ${SUBCON_URL} 发送注册请求..."
@@ -467,10 +467,10 @@ echo -e "${CYAN}║${NC}  节点名称:    ${GREEN}${BOLD}${NODE_NAME}${NC}"
 echo -e "${CYAN}║${NC}  Host:        ${GREEN}${BOLD}${HOST}${NC}"
 echo -e "${CYAN}${BOLD}╠════════════════════════════════════════════════════╣${NC}"
 echo -e "${CYAN}║${NC}  ${YELLOW}${BOLD}Surge 配置行:${NC}"
-echo -e "${CYAN}║${NC}  ${GREEN}${NODE_NAME} = snell, ${HOST}, ${PORT}, psk=${PSK}, version=5${NC}"
+echo -e "${CYAN}║${NC}  ${GREEN}${NODE_NAME} = snell, ${HOST}, ${PORT}, psk=${PSK}, version=4${NC}"
 echo -e "${CYAN}${BOLD}╠════════════════════════════════════════════════════╣${NC}"
 echo -e "${CYAN}║${NC}  ${YELLOW}${BOLD}标准 URI:${NC}"
-echo -e "${CYAN}║${NC}  ${GREEN}snell://${PSK}@${HOST}:${PORT}?version=5#${NODE_NAME}${NC}"
+echo -e "${CYAN}║${NC}  ${GREEN}snell://${PSK}@${HOST}:${PORT}?version=4#${NODE_NAME}${NC}"
 if [[ -n "${REGISTER_RESULT}" ]]; then
     echo -e "${CYAN}${BOLD}╠════════════════════════════════════════════════════╣${NC}"
     echo -e "${CYAN}║${NC}  ${YELLOW}${BOLD}SubCon 注册:${NC} ${REGISTER_RESULT}"
