@@ -440,8 +440,8 @@ if [[ "${INIT_SYSTEM}" == "openrc" ]]; then
     title "配置 OpenRC 服务"
 
     # Alpine 的 nobody 用户组一般是 nobody，没有 nogroup
-    local svc_user="nobody"
-    local svc_group="nobody"
+    svc_user="nobody"
+    svc_group="nobody"
     if ! getent group "${svc_group}" &>/dev/null; then
         svc_group="${svc_user}"
     fi
