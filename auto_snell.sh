@@ -210,7 +210,37 @@ if ! command -v unzip &>/dev/null; then
     info "unzip 安装完成"
 fi
 
-# -------------------- 4. 智能端口分配 --------------------
+# -------------------- 4. 检测已有配置（复用端口/PSK/Host/名称） --------------------
+EXISTING_PORT=""
+EXISTING_PSK=""
+EXISTING_HOST=""
+EXISTING_NAME=""
+
+if [[ -f "${SNELL_CONF_FILE}" ]]; then
+    EXISTING_PORT=$(grep -oP 'listen\s*=\s*[\d.]*:\K\d+' "${SNELL_CONF_FILE}" 2>/dev/null || true)
+    EXISTING_PSK=$(grep -oP 'psk\s*=\s*\K\S+' "${SNELL_CONF_FILE}" 2>/dev/null || true)
+    info "检测到已有配置文件: 端口=${EXISTING_PORT:-?}, PSK=${EXISTING_PSK:+***}"
+fi
+
+if [[ -f "${SNELL_CONF_DIR}/.registration_info" ]]; then
+    EXISTING_HOST=$(grep -oP '^host=\K.*' "${SNELL_CONF_DIR}/.registration_info" 2>/dev/null || true)
+    EXISTING_NAME=$(grep -oP '^name=\K.*' "${SNELL_CONF_DIR}/.registration_info" 2>/dev/null || true)
+    info "检测到已有注册信息: Host=${EXISTING_HOST:-?}, 名称=${EXISTING_NAME:-?}"
+fi
+
+if [[ -n "${EXISTING_PORT}" && -n "${EXISTING_PSK}" && -n "${EXISTING_HOST}" && -n "${EXISTING_NAME}" ]]; then
+    info "${GREEN}${BOLD}将复用已有配置，仅更新二进制并重新注册${NC}"
+    PORT="${EXISTING_PORT}"
+    PSK="${EXISTING_PSK}"
+    HOST="${EXISTING_HOST}"
+    NODE_NAME="${EXISTING_NAME}"
+    SKIP_INTERACTIVE=true
+else
+    SKIP_INTERACTIVE=false
+fi
+
+# -------------------- 5. 智能端口分配 --------------------
+if [[ "${SKIP_INTERACTIVE}" != "true" ]]; then
 generate_port() {
     local port
     local attempt=0
@@ -276,13 +306,14 @@ read -rp "$(echo -e "${CYAN}请输入节点名称（默认: ${DEFAULT_NAME}）: 
 NODE_NAME="${NODE_NAME:-${DEFAULT_NAME}}"
 info "节点名称: ${BOLD}${NODE_NAME}${NC}"
 
-# SubCon 注册地址
+fi
+
+# 始终询问 SubCon 注册信息（注册文件不保存密钥）
 read -rp "$(echo -e "${CYAN}请输入 SubCon 服务地址（直接回车默认: http://dmit.115emby.top:8090，输入 skip 跳过注册）: ${NC}")" SUBCON_URL
 SUBCON_URL="${SUBCON_URL:-http://dmit.115emby.top:8090}"
 
 SUBCON_SECRET=""
 if [[ "${SUBCON_URL}" != "skip" ]]; then
-    # 去除末尾斜杠
     SUBCON_URL="${SUBCON_URL%/}"
     read -rp "$(echo -e "${CYAN}请输入注册密钥 (SSC_NODE_SECRET): ${NC}")" SUBCON_SECRET
     if [[ -z "${SUBCON_SECRET}" ]]; then
