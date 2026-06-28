@@ -35,6 +35,7 @@ const (
 	defaultCacheTTL       = 60 * time.Second
 	defaultProxyGroupName = "Proxy"
 	defaultTarget         = "surge"
+	snellLocalSentinel    = "local://snell-nodes"
 )
 
 var (
@@ -155,6 +156,7 @@ func main() {
 	mux.HandleFunc("/api/shorten", handleShortenAPI(cfg))
 	mux.HandleFunc("/s/", handleShortLink(cfg))
 	mux.HandleFunc("/api/node", handleNodeAPI(cfg))
+	mux.HandleFunc("/api/snell-short", handleSnellShortLink(cfg))
 
 	addr := cfg.Listen + ":" + cfg.Port
 	server := &http.Server{
@@ -354,6 +356,11 @@ func convertSubscription(ctx context.Context, cfg config, subURL string, opts re
 	var allLinks []string
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+
+	// sentinel URL：仅加载本地 Snell 节点，不走外部拉取
+	if subURL == snellLocalSentinel {
+		urls = nil
+	}
 
 	// 并发抓取所有订阅源
 	for _, u := range urls {
@@ -2187,6 +2194,68 @@ func verifyHMAC(header http.Header, body []byte, secret string) bool {
 	expected := fmt.Sprintf("%x", mac.Sum(nil))
 
 	return hmac.Equal([]byte(expected), []byte(signature))
+}
+
+func handleSnellShortLink(cfg config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		sentinelURL := snellLocalSentinel
+
+		linksFileMu.Lock()
+		defer linksFileMu.Unlock()
+
+		data, err := os.ReadFile(cfg.LinksFile)
+		if err != nil && !os.IsNotExist(err) {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"success": false, "error": "server error"})
+			return
+		}
+		entries := parseLinkEntries(data)
+
+		// 查找是否已有 snell 专属短链
+		for _, entry := range entries {
+			if entry.URL == sentinelURL {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"success":  true,
+					"shortUrl": fmt.Sprintf("/s/%s", entry.Token),
+					"action":   "existing",
+				})
+				return
+			}
+		}
+
+		token := generateRandomToken(32)
+		entries = append(entries, linkEntry{
+			Token:  token,
+			Title:  "Snell-Nodes",
+			Target: "surge",
+			URL:    sentinelURL,
+		})
+
+		if err := os.MkdirAll(filepath.Dir(cfg.LinksFile), 0755); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"success": false, "error": "server error"})
+			return
+		}
+		if err := os.WriteFile(cfg.LinksFile, serializeLinkEntries(entries), 0644); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"success": false, "error": "server error"})
+			return
+		}
+
+		// 清除缓存
+		resultCache.mu.Lock()
+		resultCache.items = map[string]cacheEntry{}
+		resultCache.mu.Unlock()
+
+		log.Printf("[SHORTEN] Created snell-only short link: /s/%s", token)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"success":  true,
+			"shortUrl": fmt.Sprintf("/s/%s", token),
+			"action":   "created",
+		})
+	}
 }
 
 // 确保 bytes 包被使用
