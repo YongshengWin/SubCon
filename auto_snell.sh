@@ -399,7 +399,7 @@ if ! "${SNELL_BIN}" --version >/dev/null 2>&1; then
         info "下载 Debian glibc 运行时（~5MB）..."
         mkdir -p "${GLIBC_DIR}"
         curl -fsSL -o /tmp/libc6.deb \
-            "http://ftp.debian.org/debian/pool/main/g/glibc/libc6_2.36-9+deb12u9_amd64.deb"
+            "http://ftp.debian.org/debian/pool/main/g/glibc/libc6_2.36-9+deb12u14_amd64.deb"
         ar x /tmp/libc6.deb --output="${GLIBC_DIR}" data.tar.xz
         tar -xf "${GLIBC_DIR}/data.tar.xz" -C "${GLIBC_DIR}"
         rm -f /tmp/libc6.deb "${GLIBC_DIR}/data.tar.xz"
