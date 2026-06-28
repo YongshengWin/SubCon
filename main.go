@@ -909,7 +909,7 @@ func parseSnell(link string, opts requestOptions) (proxyNode, error) {
 	}
 
 	query := parsed.Query()
-	version := query.Get("version")
+	version := "5"
 	if version == "" {
 		version = "4"
 	}
