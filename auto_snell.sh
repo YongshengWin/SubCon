@@ -108,6 +108,13 @@ do_uninstall() {
         info "禁用 snell 服务..."
         systemctl disable snell
     fi
+    if rc-service snell status 2>/dev/null | grep -q started; then
+        info "stop snell (OpenRC)..."
+        rc-service snell stop
+    fi
+    if rc-update show 2>/dev/null | grep -q snell; then
+        rc-update del snell default 2>/dev/null || true
+    fi
 
     # 删除文件
     if [[ -f "${SNELL_BIN}" ]]; then
@@ -122,9 +129,13 @@ do_uninstall() {
         rm -f "${SNELL_SERVICE_FILE}"
         info "已删除 ${SNELL_SERVICE_FILE}"
     fi
+    if [[ -f /etc/init.d/snell ]]; then
+        rm -f /etc/init.d/snell
+        info "已删除 /etc/init.d/snell"
+    fi
 
     # 重载 systemd
-    systemctl daemon-reload
+    systemctl daemon-reload 2>/dev/null || true
     info "已重载 systemd 配置"
 
     echo ""
@@ -203,6 +214,8 @@ if ! command -v unzip &>/dev/null; then
         dnf install -y -q unzip
     elif command -v pacman &>/dev/null; then
         pacman -Sy --noconfirm unzip
+	    elif command -v apk &>/dev/null; then
+	        apk add --no-cache unzip
     else
         error "无法自动安装 unzip，请手动安装后重试"
         exit 1
@@ -408,10 +421,67 @@ port=${PORT}
 EOF
 chmod 600 "${SNELL_CONF_DIR}/.registration_info"
 
-# -------------------- 10. 创建 systemd 服务 --------------------
-title "配置 systemd 服务"
+# -------------------- 10. 创建服务（systemd / OpenRC） --------------------
+detect_init() {
+    if command -v systemctl &>/dev/null && [[ -d /etc/systemd/system ]]; then
+        echo "systemd"
+    elif [[ -f /etc/alpine-release ]]; then
+        echo "openrc"
+    elif command -v rc-service &>/dev/null; then
+        echo "openrc"
+    else
+        echo "unknown"
+    fi
+}
 
-cat > "${SNELL_SERVICE_FILE}" <<EOF
+INIT_SYSTEM=$(detect_init)
+
+if [[ "${INIT_SYSTEM}" == "openrc" ]]; then
+    title "配置 OpenRC 服务"
+
+    # Alpine 的 nobody 用户组一般是 nobody，没有 nogroup
+    local svc_user="nobody"
+    local svc_group="nobody"
+    if ! getent group "${svc_group}" &>/dev/null; then
+        svc_group="${svc_user}"
+    fi
+
+    SNELL_SERVICE_FILE="/etc/init.d/snell"
+
+    cat > "${SNELL_SERVICE_FILE}" <<'OPENRC_EOF'
+#!/sbin/openrc-run
+name="snell-server"
+description="Snell Proxy Service"
+command="/usr/local/bin/snell-server"
+command_args="-c /etc/snell/snell-server.conf"
+command_user="nobody"
+command_background=true
+pidfile="/run/snell-server.pid"
+OPENRC_EOF
+
+    chmod +x "${SNELL_SERVICE_FILE}"
+    info "服务文件已写入 ${SNELL_SERVICE_FILE}"
+
+    rc-update add snell default 2>/dev/null || true
+    if rc-service snell status 2>/dev/null | grep -q started; then
+        rc-service snell restart
+        info "snell 服务已重启"
+    else
+        rc-service snell start
+        info "snell 服务已启动"
+    fi
+
+    sleep 2
+    if rc-service snell status 2>/dev/null | grep -q started; then
+        info "${GREEN}${BOLD}snell 服务运行正常！${NC}"
+    else
+        error "snell 服务启动失败，请检查日志: tail -50 /var/log/messages"
+        exit 1
+    fi
+else
+    title "配置 systemd 服务"
+
+    cat > "${SNELL_SERVICE_FILE}" <<EOF
 [Unit]
 Description=Snell Proxy Service
 After=network.target
@@ -433,25 +503,26 @@ RestartSec=10s
 WantedBy=multi-user.target
 EOF
 
-info "服务文件已写入 ${SNELL_SERVICE_FILE}"
+    info "服务文件已写入 ${SNELL_SERVICE_FILE}"
 
-# 启动或重启服务
-systemctl daemon-reload
-if systemctl is-active --quiet snell 2>/dev/null; then
-    systemctl restart snell
-    info "snell 服务已重启"
-else
-    systemctl enable snell
-    systemctl start snell
-    info "snell 服务已启动"
-fi
+    # 启动或重启服务
+    systemctl daemon-reload
+    if systemctl is-active --quiet snell 2>/dev/null; then
+        systemctl restart snell
+        info "snell 服务已重启"
+    else
+        systemctl enable snell
+        systemctl start snell
+        info "snell 服务已启动"
+    fi
 
-sleep 2
-if systemctl is-active --quiet snell; then
-    info "${GREEN}${BOLD}snell 服务运行正常！${NC}"
-else
-    error "snell 服务启动失败，请检查日志: journalctl -u snell -n 20"
-    exit 1
+    sleep 2
+    if systemctl is-active --quiet snell; then
+        info "${GREEN}${BOLD}snell 服务运行正常！${NC}"
+    else
+        error "snell 服务启动失败，请检查日志: journalctl -u snell -n 20"
+        exit 1
+    fi
 fi
 
 # -------------------- 11. 自动注册到 SubCon --------------------
