@@ -387,50 +387,26 @@ mv "${TEMP_DIR}/snell-server" "${SNELL_BIN}"
 info "Snell 已安装到 ${SNELL_BIN}"
 
 # -------------------- 8.1 Alpine/musl 兼容处理 --------------------
-USE_GLIBC_LOADER=false
 if ! "${SNELL_BIN}" --version >/dev/null 2>&1; then
-    warn "snell-server 与当前系统不兼容（glibc vs musl），安装 glibc 运行时"
-    USE_GLIBC_LOADER=true
+    warn "snell-server 与 musl 不兼容，安装兼容层..."
+    apk add --no-cache gcompat upx
 
-    # 确保依赖可用
-    command -v ar >/dev/null 2>&1 || { apk update && apk add --no-cache binutils; }
-    command -v tar >/dev/null 2>&1 || apk add --no-cache tar
-    command -v xz >/dev/null 2>&1 || apk add --no-cache xz
+    # snell-server 是 UPX 压缩的 glibc 二进制，先解压
+    info "解压 UPX 压缩的二进制..."
+    upx -d "${SNELL_BIN}" 2>/dev/null || true
 
-    GLIBC_DIR="/opt/glibc"
-    GLIBC_LD="${GLIBC_DIR}/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
-
-    if [[ ! -f "${GLIBC_LD}" ]]; then
-        info "下载 Debian glibc 运行时（~5MB）..."
-        mkdir -p "${GLIBC_DIR}"
-        # 尝试多个 Debian 镜像源
-        for MIRROR in \
-            "http://ftp.debian.org" \
-            "http://ftp.us.debian.org" \
-            "http://ftp.cn.debian.org" \
-            "http://ftp.jp.debian.org"; do
-            curl -fsSL --connect-timeout 10 -o /tmp/libc6.deb \
-                "${MIRROR}/debian/pool/main/g/glibc/libc6_2.36-9+deb12u14_amd64.deb" && break
-        done
-        if [[ ! -f /tmp/libc6.deb || ! -s /tmp/libc6.deb ]]; then
-            error "下载 glibc 运行时失败，请检查网络"
-            exit 1
-        fi
-        ar x /tmp/libc6.deb --output="${GLIBC_DIR}" data.tar.xz
-        tar -xf "${GLIBC_DIR}/data.tar.xz" -C "${GLIBC_DIR}"
-        rm -f /tmp/libc6.deb "${GLIBC_DIR}/data.tar.xz"
+    # Alpine 缺 /lib64，而 glibc 二进制硬编码了 /lib64/ld-linux-x86-64.so.2
+    if [[ ! -d /lib64 ]]; then
+        mkdir -p /lib64
+        ln -sf /lib/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
     fi
 
-    # 创建 glibc wrapper
-    cat > /usr/local/bin/snell-server-glibc <<'GWRAP'
-#!/bin/sh
-exec /opt/glibc/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 \
-    --library-path /opt/glibc/lib/x86_64-linux-gnu \
-    /usr/local/bin/snell-server "$@"
-GWRAP
-    chmod +x /usr/local/bin/snell-server-glibc
-    SNELL_BIN="/usr/local/bin/snell-server-glibc"
-    info "glibc 运行时安装完成"
+    if "${SNELL_BIN}" --version >/dev/null 2>&1; then
+        info "${GREEN}${BOLD}兼容层安装成功${NC}"
+    else
+        error "兼容层仍未生效，请手动检查"
+        exit 1
+    fi
 fi
 
 # -------------------- 9. 写入配置文件 --------------------
