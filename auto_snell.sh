@@ -398,6 +398,9 @@ if ! "${SNELL_BIN}" --version >/dev/null 2>&1; then
     if [[ ! -f "${GLIBC_LD}" ]]; then
         info "下载 Debian glibc 运行时（~5MB）..."
         mkdir -p "${GLIBC_DIR}"
+        if ! command -v ar &>/dev/null; then
+            apk add --no-cache binutils &>/dev/null
+        fi
         curl -fsSL -o /tmp/libc6.deb \
             "http://ftp.debian.org/debian/pool/main/g/glibc/libc6_2.36-9+deb12u14_amd64.deb"
         ar x /tmp/libc6.deb --output="${GLIBC_DIR}" data.tar.xz
