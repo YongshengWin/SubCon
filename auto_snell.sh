@@ -437,6 +437,11 @@ detect_init() {
 INIT_SYSTEM=$(detect_init)
 
 if [[ "${INIT_SYSTEM}" == "openrc" ]]; then
+    # snell-server 是 glibc 编译的，Alpine musl 需要兼容层
+    if ! apk info gcompat &>/dev/null 2>&1; then
+        apk add --no-cache gcompat
+    fi
+
     title "配置 OpenRC 服务"
 
     # Alpine 的 nobody 用户组一般是 nobody，没有 nogroup
